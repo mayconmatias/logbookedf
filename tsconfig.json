@@ -1,0 +1,21 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    
+    // ADICIONE ISTO:
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  // INCLUA O App.tsx AQUI:
+  "include": [
+    "src",
+    "App.tsx",
+    "app.config.cts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
