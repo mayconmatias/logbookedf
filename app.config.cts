@@ -2,16 +2,14 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: "Logbook EDF",
+  name: "Logbook EdF",
   slug: "logbookedf",
   scheme: "logbookedf",
-  version: "1.0.0",
+  version: "1.0.2",
   orientation: "portrait",
   icon: "./assets/icon.png",
   userInterfaceStyle: "automatic",
   
-  owner: "profmaycon",
-
   splash: {
     image: "./assets/splash.png",
     resizeMode: "contain",
@@ -28,7 +26,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   
   android: {
     package: "com.mayconmatias.logbookedf",
-    versionCode: 1,
+    versionCode: 2,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png", 
       backgroundColor: "#ffffff"
@@ -46,7 +44,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   },
 
   runtimeVersion: {
-    policy: "sdkVersion"
+    policy: "appVersion"
   },
 
   extra: {
