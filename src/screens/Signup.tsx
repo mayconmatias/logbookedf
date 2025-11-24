@@ -1,11 +1,11 @@
-// src/screens/Signup.tsx
-
 import { useState } from "react";
-// Importe os componentes necessários
 import { View, Text, TextInput, Button, Alert, StyleSheet, TouchableOpacity } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../../App";
-import { supabase } from "@/lib/supabase";
+
+import type { RootStackParamList } from "@/types/navigation";
+import { supabase } from "@/lib/supabaseClient";
+import { validateCPF } from "@/utils/validation"; // <-- 1. Importar o validador
+import t from "@/i18n/pt"; // <-- 2. Importar as strings
 
 export default function Signup({ navigation }: NativeStackScreenProps<RootStackParamList, "Signup">) {
   const [email, setEmail] = useState("");
@@ -14,8 +14,12 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async () => {
+    // 3. Aplicar validação
     if (!email || !password || !cpf) {
-      return Alert.alert("Atenção", "Preencha todos os campos.");
+      return Alert.alert(t.common.attention, t.auth.validationFields);
+    }
+    if (!validateCPF(cpf)) {
+      return Alert.alert(t.common.attention, t.auth.validationCpf);
     }
     
     try {
@@ -29,13 +33,13 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
       if (error) throw error;
 
       Alert.alert(
-        "Cadastro enviado!", 
-        "Enviamos um link de confirmação para o seu e-mail. Por favor, verifique sua caixa de entrada para ativar sua conta."
+        t.auth.signupSuccessTitle, 
+        t.auth.signupSuccessBody
       );
       navigation.goBack(); 
 
     } catch (e: any) {
-      Alert.alert("Erro no cadastro", e.message ?? "Não foi possível criar a conta.");
+      Alert.alert(t.auth.errorSignup, e.message ?? t.auth.errorSignupMessage);
     } finally {
       setLoading(false);
     }
@@ -43,11 +47,12 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Criar nova conta</Text>
+      {/* 4. Substituir strings por 't' */}
+      <Text style={styles.title}>{t.auth.signupTitle}</Text>
       
       <TextInput
         style={styles.input}
-        placeholder="email@exemplo.com"
+        placeholder={t.auth.emailPlaceholder}
         autoCapitalize="none"
         keyboardType="email-address"
         value={email}
@@ -55,42 +60,42 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
       />
       <TextInput
         style={styles.input}
-        placeholder="CPF (apenas números)"
+        placeholder={t.auth.cpfPlaceholder}
         keyboardType="number-pad"
         value={cpf}
         onChangeText={setCpf}
       />
       <TextInput
         style={styles.input}
-        placeholder="Senha (mínimo 6 caracteres)"
+        placeholder={t.auth.passwordMinChars}
         secureTextEntry
         value={password}
         onChangeText={setPassword}
       />
 
-      {/* Botão "Criar conta" Atualizado */}
       <TouchableOpacity 
         style={[styles.buttonPrimary, loading ? styles.buttonDisabled : {}]} 
         onPress={handleSignup} 
         disabled={loading}
       >
-        <Text style={styles.buttonTextPrimary}>{loading ? "Criando..." : "Criar conta"}</Text>
+        <Text style={styles.buttonTextPrimary}>
+          {loading ? t.auth.signupButtonLoading : t.auth.signupButton}
+        </Text>
       </TouchableOpacity>
       
       <View style={{ height: 12 }} />
 
-      {/* Botão "Já tenho conta" Atualizado */}
       <TouchableOpacity 
         style={styles.buttonSecondary} 
         onPress={() => navigation.goBack()}
       >
-        <Text style={styles.buttonTextSecondary}>Já tenho conta</Text>
+        <Text style={styles.buttonTextSecondary}>{t.auth.goToLogin}</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
-// Estilos (idênticos ao LoginCPF)
+// Estilos
 const styles = StyleSheet.create({
   container: {
     flex: 1,

@@ -1,9 +1,28 @@
 {
   "expo": {
+    "name": "Logbook EDF",
+    "slug": "logbookedf",
+    "version": "1.0.0",
+    "icon": "./assets/icon.png",
+    "orientation": "portrait",
+    "ios": {
+      "bundleIdentifier": "com.mayconmatias.logbookedf"
+    },
+    "android": {
+      "package": "com.mayconmatias.logbookedf"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-asset"
+    ],
     "extra": {
       "eas": {
-        "projectId": "2150e8c7-7ee5-4f4e-8c5a-3617cf464e1f"
+        "projectId": "c69323ab-c81d-444e-821a-4dad327e89f8"
       }
+    },
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/c69323ab-c81d-444e-821a-4dad327e89f8"
     }
   }
 }

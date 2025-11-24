@@ -1,54 +1,149 @@
-// src/screens/WorkoutHistory.tsx
-
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react'; 
+import { 
+  View, Text, StyleSheet, ScrollView, 
+  ActivityIndicator, Alert, TouchableOpacity,
+  LayoutAnimation, Platform, UIManager 
+} from 'react-native'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../../App';
-import { supabase } from '@/lib/supabase';
 import { Calendar, LocaleConfig, DateData } from 'react-native-calendars';
-// MUDANÇA AQUI: Importar o ícone de 3 bolinhas
-import { Feather } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons'; 
 
-// (Configuração do Locale)
+import WorkoutShareModal from '@/components/WorkoutShareModal'; 
+
+// Importa os tipos globais
+import type { RootStackParamList } from "@/types/navigation";
+import type { 
+  WorkoutHistoryItem, 
+  WorkoutExercise,
+  HistoricalRepPR,
+  HistoricalWeightPR,
+  WorkoutSet 
+} from "@/types/workout"; 
+import { supabase } from "@/lib/supabaseClient";
+
+// Habilita animações no Android
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 LocaleConfig.locales['pt-br'] = { monthNames: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'], monthNamesShort: ['Jan.', 'Fev.', 'Mar.', 'Abr.', 'Mai.', 'Jun.', 'Jul.', 'Ago.', 'Set.', 'Out.', 'Nov.', 'Dez.',], dayNames: ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'], dayNamesShort: ['Dom.', 'Seg.', 'Ter.', 'Qua.', 'Qui.', 'Sex.', 'Sáb.'], today: "Hoje" };
 LocaleConfig.defaultLocale = 'pt-br';
 
-// (Tipos)
-type WorkoutHistoryItem = {
-  id: string;
-  workout_date: string;
-  exercises: { name: string }[];
-};
 type WorkoutHistoryProps = NativeStackScreenProps<RootStackParamList, "WorkoutHistory">;
 
 const workoutDot = { color: '#007AFF', key: 'workout' };
 
-export default function WorkoutHistory({ navigation }: WorkoutHistoryProps) {
+// --- Helper para agrupar séries (Lógica similar ao ShareableCard) ---
+const getGroupedSetsSummary = (sets: WorkoutSet[]) => {
+  if (!sets || sets.length === 0) return [];
+
+  const groups: { count: number; weight: number; reps: number; side?: string }[] = [];
+
+  sets.forEach(set => {
+    if (set.weight === 0 && set.reps === 0) return; // Ignora ghost sets
+
+    const existing = groups.find(
+      g => g.weight === set.weight && g.reps === set.reps && g.side === set.side
+    );
+
+    if (existing) {
+      existing.count += 1;
+    } else {
+      groups.push({
+        count: 1,
+        weight: set.weight,
+        reps: set.reps,
+        side: set.side,
+      });
+    }
+  });
+
+  // Formata para string
+  return groups.map(g => {
+    const side = g.side ? ` (${g.side})` : '';
+    return `${g.count} x ${g.weight}kg - ${g.reps} reps${side}`;
+  });
+};
+
+export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProps) {
   const [loading, setLoading] = useState(true);
   const [workouts, setWorkouts] = useState<WorkoutHistoryItem[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [workoutMarkers, setWorkoutMarkers] = useState<Record<string, any>>({});
+ 
+  // Controle de expansão dos cards (Set de IDs)
+  const [expandedWorkoutIds, setExpandedWorkoutIds] = useState<Set<string>>(new Set());
 
-  // MUDANÇA AQUI: Adicionar um 'listener' da navegação
-  // Isso força a tela a recarregar os dados quando o usuário volta
-  // (ex: depois de deletar ou editar um treino)
+  const [isWorkoutShareModalVisible, setIsWorkoutShareModalVisible] = useState(false);
+  const [workoutToShare, setWorkoutToShare] = useState<WorkoutHistoryItem | null>(null);
+  
+  const [isFetchingPRs, setIsFetchingPRs] = useState(false);
+  const [repPRs, setRepPRs] = useState<HistoricalRepPR[]>([]);
+  const [weightPRs, setWeightPRs] = useState<HistoricalWeightPR[]>([]);
+
+  const highlightId = route.params?.highlightWorkoutId;
+
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      fetchHistory(); // Recarrega os dados toda vez que a tela entra em foco
+      fetchHistory(); 
     });
-
-    return unsubscribe; // Limpa o listener ao sair da tela
+    return unsubscribe; 
   }, [navigation]);
+
+  useEffect(() => {
+    if (loading || !highlightId || isWorkoutShareModalVisible) return;
+    const workoutToShare = workouts.find(w => w.id === highlightId);
+    if (workoutToShare) {
+      // Se veio de um redirecionamento, expande o card automaticamente
+      toggleExpand(highlightId); 
+      navigation.setParams({ highlightWorkoutId: undefined });
+    } 
+  }, [loading, workouts, highlightId, navigation, isWorkoutShareModalVisible]); 
 
   const fetchHistory = async () => {
     setLoading(true);
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const { data, error } = await supabase
         .from('workouts')
-        .select(`id, workout_date, exercises ( name )`)
-        .order('workout_date', { ascending: false }); 
+        .select(`
+          id, 
+          workout_date,
+          user_id,
+          exercises ( 
+            id, 
+            definition_id,
+            definition:exercise_definitions ( name ),
+            sets ( weight, reps, side, set_number ) 
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('workout_date', { ascending: false })
+        .order('created_at', { referencedTable: 'exercises', ascending: true })
+        .order('set_number', { referencedTable: 'exercises.sets', ascending: true }); 
+       
       if (error) throw error;
-      const historyItems = data as WorkoutHistoryItem[];
+     
+      const historyItems: WorkoutHistoryItem[] = data.map((workout: any) => {
+        const [year, month, day] = workout.workout_date.split('-');
+        const formattedTitle = `Treino do dia ${day}-${month}`;
+
+        return {
+          id: workout.id,
+          workout_date: workout.workout_date,
+          user_id: workout.user_id,
+          template_name: formattedTitle, 
+          performed_data: workout.exercises.map((ex: any) => ({
+            id: ex.id,
+            definition_id: ex.definition_id,
+            name: ex.definition ? ex.definition.name : 'Exercício Excluído',
+            sets: ex.sets || [],
+          })),
+        };
+      });
+
       setWorkouts(historyItems);
       processWorkoutsForMarking(historyItems);
     } catch (e: any) {
@@ -75,7 +170,7 @@ export default function WorkoutHistory({ navigation }: WorkoutHistoryProps) {
     });
     setWorkoutMarkers(markers);
   };
-
+  
   const combinedMarkedDates = useMemo(() => {
     const newMarkedDates = { ...workoutMarkers };
     if (newMarkedDates[selectedDate]) {
@@ -86,27 +181,35 @@ export default function WorkoutHistory({ navigation }: WorkoutHistoryProps) {
     return newMarkedDates;
   }, [workoutMarkers, selectedDate]);
 
-  // MUDANÇA AQUI: Nova função para o menu de opções do treino
+  const toggleExpand = (id: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedWorkoutIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
   const handleOpenWorkoutMenu = (workout: WorkoutHistoryItem) => {
     Alert.alert(
-      `Sessão de ${workout.workout_date}`,
+      `Opções do Treino`,
       "O que você gostaria de fazer?",
       [
-        // Botão 1: Editar
         {
           text: "Editar Treino",
           onPress: () => {
-            // Navega para LogWorkout no MODO EDIÇÃO
             navigation.navigate("LogWorkout", { workoutId: workout.id });
           }
         },
-        // Botão 2: Deletar
         {
           text: "Deletar Treino",
           style: "destructive",
           onPress: () => handleDeleteWorkout(workout.id)
         },
-        // Botão 3: Cancelar
         {
           text: "Cancelar",
           style: "cancel"
@@ -114,8 +217,7 @@ export default function WorkoutHistory({ navigation }: WorkoutHistoryProps) {
       ]
     );
   };
-
-  // MUDANÇA AQUI: Nova função para DELETAR O TREINO INTEIRO
+ 
   const handleDeleteWorkout = (workoutId: string) => {
     Alert.alert(
       "Deletar Treino",
@@ -127,18 +229,15 @@ export default function WorkoutHistory({ navigation }: WorkoutHistoryProps) {
           style: "destructive", 
           onPress: async () => {
             try {
-              // 1. Deleta da tabela 'workouts'
-              // O 'ON DELETE CASCADE' do SQL deletará todos os 'exercises' e 'sets'
               const { error } = await supabase
                 .from("workouts")
                 .delete()
                 .eq("id", workoutId);
-              
+             
               if (error) throw error;
-              
-              // 2. Atualiza a UI (recarrrega tudo)
+             
               Alert.alert("Sucesso", "Treino deletado.");
-              fetchHistory(); // Recarrega os dados para atualizar a lista e as bolinhas
+              fetchHistory(); 
 
             } catch (e: any) {
               Alert.alert("Erro ao deletar treino", e.message);
@@ -149,10 +248,72 @@ export default function WorkoutHistory({ navigation }: WorkoutHistoryProps) {
     );
   };
 
+  const handleSharePress = (workout: WorkoutHistoryItem) => {
+    openShareModal(workout);
+  };
+
+  const openShareModal = async (workout: WorkoutHistoryItem) => {
+    setIsFetchingPRs(true);
+    setWorkoutToShare(workout); 
+    setIsWorkoutShareModalVisible(true);
+   
+    try {
+      const definitionIds = workout.performed_data.map(ex => ex.definition_id);
+     
+      if (definitionIds.length === 0) {
+        setRepPRs([]);
+        setWeightPRs([]);
+        setIsFetchingPRs(false);
+        return;
+      }
+
+      const [repPRsData, weightPRsData] = await Promise.all([
+        supabase.rpc('get_historical_rep_prs', {
+          p_definition_ids: definitionIds,
+          p_exclude_workout_id: workout.id
+        }),
+        supabase.rpc('get_historical_weight_prs', {
+          p_definition_ids: definitionIds,
+          p_exclude_workout_id: workout.id
+        })
+      ]);
+
+      if (repPRsData.error) throw repPRsData.error;
+      if (weightPRsData.error) throw weightPRsData.error;
+
+      setRepPRs(repPRsData.data as HistoricalRepPR[]);
+      setWeightPRs(weightPRsData.data as HistoricalWeightPR[]);
+     
+    } catch (e: any) {
+      Alert.alert("Erro ao buscar recordes", e.message);
+      setRepPRs([]); 
+      setWeightPRs([]);
+    } finally {
+      setIsFetchingPRs(false); 
+    }
+  };
+ 
+  const closeWorkoutShareModal = () => {
+    setIsWorkoutShareModalVisible(false);
+    setWorkoutToShare(null);
+    setRepPRs([]); 
+    setWeightPRs([]);
+  }
+
   const workoutsOnSelectedDate = workouts.filter(w => w.workout_date === selectedDate);
 
   return (
     <ScrollView style={styles.container}>
+      
+      <WorkoutShareModal
+        visible={isWorkoutShareModalVisible}
+        onClose={closeWorkoutShareModal}
+        isFetchingPRs={isFetchingPRs}
+        workout={workoutToShare}
+        repPRs={repPRs}
+        weightPRs={weightPRs}
+      />
+     
       <Calendar
         style={styles.calendar}
         current={selectedDate}
@@ -161,74 +322,169 @@ export default function WorkoutHistory({ navigation }: WorkoutHistoryProps) {
         onDayPress={(day: DateData) => { setSelectedDate(day.dateString); }}
         theme={{ arrowColor: '#007AFF', todayTextColor: '#007AFF', }}
       />
-      
+     
       <View style={styles.listContainer}>
-        <Text style={styles.listTitle}>Treinos em {selectedDate}</Text>
+        <Text style={styles.listTitle}>
+          Treinos em {new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}
+        </Text>
         {loading && <ActivityIndicator />}
-        
+       
         {!loading && workoutsOnSelectedDate.length === 0 && (
           <Text style={styles.emptyText}>Nenhum treino registrado neste dia.</Text>
         )}
 
-        {!loading && workoutsOnSelectedDate.map(workout => (
-          // MUDANÇA AQUI: O Card de treino agora tem o menu
-          <View key={workout.id} style={styles.workoutCard}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.workoutCardTitle}>Sessão de Treino</Text>
-              <TouchableOpacity 
-                style={styles.menuButton}
-                onPress={() => handleOpenWorkoutMenu(workout)}
-              >
-                <Feather name="more-vertical" size={20} color="#555" />
-              </TouchableOpacity>
-            </View>
-            
-            {workout.exercises.slice(0, 3).map((ex, index) => (
-              <Text key={index} style={styles.exerciseText}>- {ex.name}</Text>
-            ))}
-            {workout.exercises.length > 3 && <Text style={styles.exerciseText}>...</Text>}
-          </View>
-        ))}
+        {!loading && workoutsOnSelectedDate.map(workout => {
+          const isExpanded = expandedWorkoutIds.has(workout.id);
+
+          return (
+            <TouchableOpacity
+              key={workout.id}
+              style={styles.workoutCard}
+              onPress={() => toggleExpand(workout.id)}
+              onLongPress={() => handleOpenWorkoutMenu(workout)}
+              delayLongPress={500}
+              activeOpacity={0.7}
+            >
+              <View style={styles.cardHeader}>
+                <Text style={styles.workoutCardTitle}>
+                  {workout.template_name}
+                </Text>
+
+                <View style={styles.buttonRow}>
+                   {/* Botão de Share Mantido, mas isolado */}
+                  <TouchableOpacity 
+                    style={styles.iconButton}
+                    onPress={() => handleSharePress(workout)}
+                  >
+                    <Feather name="share" size={20} color="#007AFF" />
+                  </TouchableOpacity>
+                  
+                  {/* Ícone de Seta para indicar expansão */}
+                  <View style={styles.iconButton}>
+                     <Feather 
+                       name={isExpanded ? "chevron-up" : "chevron-down"} 
+                       size={20} 
+                       color="#A0AEC0" 
+                     />
+                  </View>
+                </View>
+              </View>
+              
+              {/* Conteúdo: Lista de Exercícios */}
+              <View>
+                {workout.performed_data.map((ex, index) => {
+                  const setsSummary = getGroupedSetsSummary(ex.sets);
+                  
+                  return (
+                    <View key={index} style={styles.exerciseRow}>
+                      {/* Nome do Exercício */}
+                      <Text style={styles.exerciseTitle}>
+                         • {ex.name}
+                      </Text>
+                      
+                      {/* Detalhes (Aparecem só se expandido) */}
+                      {isExpanded && (
+                        <View style={styles.setsContainer}>
+                           {setsSummary.length > 0 ? (
+                             setsSummary.map((line, idx) => (
+                               <Text key={idx} style={styles.setText}>
+                                  {line}
+                               </Text>
+                             ))
+                           ) : (
+                             <Text style={styles.setText}>Sem séries registradas.</Text>
+                           )}
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+              
+              {/* Dica Visual no Rodapé do Card quando recolhido */}
+              {!isExpanded && (
+                 <Text style={styles.hintText}>Toque para ver detalhes • Segure para editar</Text>
+              )}
+
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </ScrollView>
   );
 }
 
-// MUDANÇA AQUI: Novos estilos para o cabeçalho do card
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff', },
   calendar: { borderBottomWidth: 1, borderColor: '#eee', marginBottom: 10, },
-  listContainer: { padding: 20, },
+  listContainer: { padding: 20, paddingBottom: 40 },
   listTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, },
   emptyText: { fontSize: 16, color: '#777', textAlign: 'center', marginTop: 20, },
+  
   workoutCard: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
     padding: 16,
     marginBottom: 16,
+    // Sombra mais bonita
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#E2E8F0'
   },
   cardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'space-between', 
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F7FAFC',
+    paddingBottom: 8
   },
   workoutCardTitle: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     flex: 1,
+    color: '#2D3748', 
   },
-  menuButton: {
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  iconButton: {
     padding: 8,
+    marginLeft: 4,
   },
-  exerciseText: {
+  
+  exerciseRow: {
+    marginBottom: 8,
+  },
+  exerciseTitle: {
     fontSize: 16,
-    color: '#555',
-    marginLeft: 10,
+    fontWeight: '600',
+    color: '#4A5568',
+    marginBottom: 2,
+  },
+  setsContainer: {
+    paddingLeft: 14,
+    marginTop: 2,
+    marginBottom: 6,
+    borderLeftWidth: 2,
+    borderLeftColor: '#E2E8F0'
+  },
+  setText: {
+    fontSize: 14,
+    color: '#718096',
+    lineHeight: 20,
+  },
+  hintText: {
+    fontSize: 12,
+    color: '#A0AEC0',
+    marginTop: 8,
+    textAlign: 'center',
+    fontStyle: 'italic'
   }
 });

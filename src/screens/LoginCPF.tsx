@@ -1,11 +1,11 @@
-// src/screens/LoginCPF.tsx
-
 import { useState } from "react";
-// Importe os componentes necessários
 import { View, Text, TextInput, Alert, StyleSheet, TouchableOpacity } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../../App";
-import { supabase } from "@/lib/supabase";
+
+import type { RootStackParamList } from "@/types/navigation";
+import { supabase } from "@/lib/supabaseClient";
+import { validateCPF } from "@/utils/validation";
+import t from "@/i18n/pt";
 
 export default function LoginCPF({ navigation }: NativeStackScreenProps<RootStackParamList, "LoginCPF">) {
   const [cpf, setCpf] = useState("");
@@ -13,23 +13,29 @@ export default function LoginCPF({ navigation }: NativeStackScreenProps<RootStac
   const [loading, setLoading] = useState(false);
 
   const login = async () => {
-    if (!cpf || !password) return Alert.alert("Atenção", "Informe CPF e senha.");
+    if (!cpf || !password) {
+      return Alert.alert(t.common.attention, t.auth.validationFields);
+    }
+    if (!validateCPF(cpf)) {
+      return Alert.alert(t.common.attention, t.auth.validationCpf);
+    }
+    
     try {
       setLoading(true);
       const { data: rpc, error: e1 } = await supabase.rpc("get_email_by_cpf", { p_cpf: cpf });
       if (e1) throw e1;
       const email = (rpc as string) || "";
-      if (!email) throw new Error("CPF não encontrado");
+      if (!email) throw new Error(t.auth.errorCpfNotFound);
 
       const { error: e2 } = await supabase.auth.signInWithPassword({ email, password });
       if (e2) {
         if (e2.message.includes("Email not confirmed")) {
-          throw new Error("Seu e-mail ainda não foi verificado. Por favor, cheque sua caixa de entrada.");
+          throw new Error(t.auth.errorEmailNotConfirmed);
         }
         throw e2;
       }
     } catch (e: any) {
-      Alert.alert("Erro", e.message ?? "Falha no login");
+      Alert.alert(t.auth.errorTitle, e.message ?? t.auth.errorLogin);
     } finally {
       setLoading(false);
     }
@@ -37,45 +43,57 @@ export default function LoginCPF({ navigation }: NativeStackScreenProps<RootStac
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Entrar com CPF e senha</Text>
+      <Text style={styles.title}>{t.auth.loginTitle}</Text>
+      
       <TextInput
         style={styles.input}
-        placeholder="CPF (apenas números)"
+        placeholder={t.auth.cpfPlaceholder}
         keyboardType="number-pad"
         value={cpf}
         onChangeText={setCpf}
       />
       <TextInput
         style={styles.input}
-        placeholder="Senha"
+        placeholder={t.auth.passwordPlaceholder}
         secureTextEntry
         value={password}
         onChangeText={setPassword}
       />
       
-      {/* Botão "Entrar" Atualizado */}
+      {/* Botão Principal: ENTRAR */}
       <TouchableOpacity 
         style={[styles.buttonPrimary, loading ? styles.buttonDisabled : {}]} 
         onPress={login} 
         disabled={loading}
       >
-        <Text style={styles.buttonTextPrimary}>{loading ? "Entrando..." : "Entrar"}</Text>
+        <Text style={styles.buttonTextPrimary}>
+          {loading ? t.auth.loginButtonLoading : t.auth.loginButton}
+        </Text>
       </TouchableOpacity>
       
       <View style={{ height: 12 }} />
 
-      {/* Botão "Criar nova conta" Atualizado */}
+      {/* Botão Secundário: CRIAR CONTA */}
       <TouchableOpacity 
         style={styles.buttonSecondary} 
         onPress={() => navigation.navigate("Signup")}
       >
-        <Text style={styles.buttonTextSecondary}>Criar nova conta</Text>
+        <Text style={styles.buttonTextSecondary}>{t.auth.goToSignup}</Text>
       </TouchableOpacity>
+
+      {/* Link Discreto: ESQUECI A SENHA */}
+      <TouchableOpacity 
+        onPress={() => navigation.navigate("ForgotPassword")}
+        style={styles.linkContainer}
+      >
+        <Text style={styles.linkText}>Esqueci minha senha</Text>
+      </TouchableOpacity>
+
     </View>
   );
 }
 
-// Estilos adicionados (padrão de formulário)
+// Estilos
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -89,20 +107,24 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 20,
+    color: '#1A202C',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#E2E8F0',
     paddingHorizontal: 12,
     paddingVertical: 14,
     borderRadius: 10,
     fontSize: 16,
+    color: '#2D3748',
+    backgroundColor: '#F7FAFC',
   },
   buttonPrimary: {
     backgroundColor: '#007AFF',
     paddingVertical: 14,
     borderRadius: 10,
     alignItems: 'center',
+    marginTop: 8,
   },
   buttonTextPrimary: {
     color: '#fff',
@@ -123,6 +145,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   buttonDisabled: {
-    backgroundColor: '#A9A9A9', // Cinza quando desabilitado
-  }
+    backgroundColor: '#A9A9A9',
+  },
+  
+  // Estilos do Link de Texto
+  linkContainer: {
+    marginTop: 24, // Espaço maior para separar dos botões
+    alignItems: 'center',
+    padding: 8,
+  },
+  linkText: {
+    color: '#718096', // Cinza discreto
+    fontSize: 14,
+    textDecorationLine: 'underline', // Opcional: sublinhado para indicar clique
+  },
 });

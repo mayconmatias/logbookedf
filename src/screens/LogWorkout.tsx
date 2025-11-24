@@ -1,341 +1,618 @@
-// src/screens/LogWorkout.tsx
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from 'react';
+import {
+  View,
+  Text,
+  Alert,
+  StyleSheet,
+  ActivityIndicator,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  Linking,
+} from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
+import { useDebounce } from 'use-debounce';
+import * as Haptics from 'expo-haptics';
+import DraggableFlatList, { 
+  RenderItemParams, 
+  ScaleDecorator 
+} from 'react-native-draggable-flatlist';
 
-import { useState, useEffect, useRef } from "react";
-import { View, Text, TextInput, Alert, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, ScrollView as RNScrollView } from "react-native";
-import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../../App";
-import { supabase } from "@/lib/supabase";
-import { Feather } from '@expo/vector-icons'; 
+import t from '@/i18n/pt';
+import type { RootStackParamList } from '@/types/navigation';
+import { WorkoutExercise, WorkoutSet } from '@/types/workout';
+import { PlannedExercise } from '@/types/coaching';
+import { fetchPlannedExercises } from '@/services/workout_planning.service';
 
-// (Tipos de dados)
-type SetData = { id: string; set_number: number; weight: number; reps: number; rpe?: number; observations?: string; performed_at: string; };
-type ExerciseData = { id: string; name: string; sets: SetData[]; };
-type GroupedWorkout = ExerciseData[];
+import WorkoutForm, { WorkoutFormProps } from '@/components/WorkoutForm';
+import ExerciseCard from '@/components/ExerciseCard';
+import {
+  ExerciseAnalyticsSheet,
+  ExerciseAnalyticsSheetRef,
+} from '@/components/ExerciseAnalyticsSheet';
+import SetShareModal from '@/components/SetShareModal';
+import ProgressionShareModal from '@/components/ProgressionShareModal';
 
-// MUDANÇA AQUI: O tipo das props agora lê os 'route.params'
-export default function LogWorkout({ navigation, route }: NativeStackScreenProps<RootStackParamList, "LogWorkout">) {
-  // Lê o workoutId opcional dos parâmetros da rota
-  const { workoutId: paramWorkoutId } = route.params || {};
+import { useWorkoutSession } from '@/hooks/useWorkoutSession';
+import { useExerciseCatalog } from '@/hooks/useExerciseCatalog';
+import { usePerformancePeek } from '@/hooks/usePerformancePeek';
+import { useShareFlows } from '@/hooks/useShareFlows';
+import { useTimer } from '@/context/TimerContext';
 
-  // MUDANÇA AQUI: Renomeado para 'sessionWorkoutId'
-  const [sessionWorkoutId, setSessionWorkoutId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+import {
+  getOrCreateExerciseInWorkout,
+  saveSet,
+  deleteSet,
+  deleteExercise,
+  updateSet,
+  reorderWorkoutExercises,
+} from '@/services/exercises.service';
+import { fetchAndGroupWorkoutData } from '@/services/workouts.service'; 
+import { calculateE1RM, LBS_TO_KG_FACTOR } from '@/utils/e1rm';
+import { classifyPR } from '@/services/records.service';
+
+const LogWorkoutScreen = ({
+  navigation,
+  route,
+}: NativeStackScreenProps<RootStackParamList, 'LogWorkout'>) => {
+  const { workoutId: paramWorkoutId, templateId: paramTemplateId } = route.params || {};
+  const { startTimer } = useTimer();
+
+  const {
+    loading,
+    sessionWorkoutId,
+    groupedWorkout,
+    setGroupedWorkout,
+    finishWorkout,
+  } = useWorkoutSession(paramWorkoutId, paramTemplateId);
+
+  const {
+    allExercises: allExerciseDefinitions,
+    allExerciseNames,
+    handleCreateExercise: handleCreateDefinition,
+  } = useExerciseCatalog();
+
+  const {
+    loadingStats,
+    exerciseStats,
+    fetchQuickStats,
+    invalidateCache,
+    clearPeek,
+  } = usePerformancePeek();
+
+  const {
+    isSetShareModalVisible,
+    isProgressionShareModalVisible,
+    setToshare,
+    isSharingPR,
+    exerciseNameToShare,
+    progressionDataForModal,
+    currentSessionTEV,
+    isFetchingShareData,
+    handleOpenSetShareModal,
+    handleCloseSetShareModal,
+    handleOpenProgressionShareModal,
+    handleCloseProgressionShareModal,
+  } = useShareFlows(groupedWorkout);
+
+  const [definitionIdToShare, setDefinitionIdToShare] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [exerciseName, setExerciseName] = useState("");
-  const [weight, setWeight] = useState("");
-  const [reps, setReps] = useState("");
-  const [rpe, setRpe] = useState("");
-  const [observations, setObservations] = useState("");
-  const [groupedWorkout, setGroupedWorkout] = useState<GroupedWorkout>([]);
+  const [inputUnit, setInputUnit] = useState<'kg' | 'lbs'>('kg');
+  const [exerciseName, setExerciseName] = useState('');
+  const [currentDefinitionId, setCurrentDefinitionId] = useState<string | null>(null);
+  const [weight, setWeight] = useState('');
+  const [reps, setReps] = useState('');
+  const [rpe, setRpe] = useState('');
+  const [observations, setObservations] = useState('');
+  const [baseObservation, setBaseObservation] = useState('');
+  const [isUnilateral, setIsUnilateral] = useState(false);
+  const [side, setSide] = useState<'E' | 'D' | null>(null);
+  const [isAutocompleteFocused, setIsAutocompleteFocused] = useState(false);
+  const [prSetIds, setPrSetIds] = useState<Set<string>>(new Set());
+
+  const [prescriptions, setPrescriptions] = useState<Record<string, PlannedExercise>>({});
+  const [loadingPrescription, setLoadingPrescription] = useState(false);
   
-  const scrollViewRef = useRef<RNScrollView>(null);
+  const [editingSetId, setEditingSetId] = useState<string | null>(null);
+  const [isReordering, setIsReordering] = useState(false);
 
-  const getTodayDateString = () => new Date().toISOString().split('T')[0];
+  const currentPlan = currentDefinitionId ? prescriptions[currentDefinitionId] : null;
+  
+  const analyticsSheetRef = useRef<ExerciseAnalyticsSheetRef>(null);
+  const [debouncedExerciseName] = useDebounce(exerciseName, 500);
 
-  // MUDANÇA AQUI: Lógica de inicialização com dois modos
+  const handleCleanup = useCallback(() => {
+    if (!paramWorkoutId) {
+      finishWorkout();
+    }
+  }, [finishWorkout, paramWorkoutId]);
+
   useEffect(() => {
-    const initializeSession = async () => {
-      setLoading(true);
-      try {
-        if (paramWorkoutId) {
-          // === MODO EDIÇÃO ===
-          // Se um workoutId foi passado, estamos editando.
-          console.log("Modo Edição: Carregando treino ID:", paramWorkoutId);
-          navigation.setOptions({ title: "Editar Treino" }); // Atualiza o título da tela
-          await fetchAndGroupWorkoutData(paramWorkoutId);
-          setSessionWorkoutId(paramWorkoutId); // Define o ID da sessão
-        } else {
-          // === MODO CRIAÇÃO ===
-          // Se nenhum workoutId foi passado, criamos um novo.
-          console.log("Modo Criação: Criando novo treino.");
-          navigation.setOptions({ title: "Registrar Treino" }); // Título padrão
-          await createNewWorkoutSession();
+    const unsubscribe = navigation.addListener('blur', () => { handleCleanup(); });
+    return unsubscribe;
+  }, [navigation, handleCleanup]);
+
+  useEffect(() => {
+    const applyPlan = async () => {
+      if (paramTemplateId && sessionWorkoutId && !loading) {
+        if (groupedWorkout.length > 0) {
+          if (Object.keys(prescriptions).length === 0) {
+             const plannedExercises = await fetchPlannedExercises(paramTemplateId);
+             const prescrMap: Record<string, PlannedExercise> = {};
+             plannedExercises.forEach(p => prescrMap[p.definition_id] = p);
+             setPrescriptions(prescrMap);
+          }
+          return;
         }
-      } catch (e: any) {
-        Alert.alert("Erro ao carregar sessão", e.message);
-        navigation.goBack();
-      } finally {
-        setLoading(false);
+        setLoadingPrescription(true);
+        try {
+          const plannedExercises = await fetchPlannedExercises(paramTemplateId);
+          const prescrMap: Record<string, PlannedExercise> = {};
+          
+          for (const plan of plannedExercises) {
+            const exInstanceId = await getOrCreateExerciseInWorkout(sessionWorkoutId, plan.definition_id);
+            
+            prescrMap[plan.definition_id] = plan;
+            const targetSets = plan.sets_count || 3;
+            
+            for (let i = 1; i <= targetSets; i++) {
+              await saveSet({
+                exercise_id: exInstanceId,
+                set_number: i,
+                weight: 0,
+                reps: 0,
+                rpe: plan.rpe_target ? parseFloat(plan.rpe_target) : undefined,
+              });
+            }
+          }
+          setPrescriptions(prescrMap);
+          const updatedData = await fetchAndGroupWorkoutData(sessionWorkoutId);
+          setGroupedWorkout(updatedData);
+        } catch (e) { 
+          console.error("Erro ao aplicar plano:", e); 
+        } finally { 
+          setLoadingPrescription(false); 
+        }
       }
     };
+    applyPlan();
+  }, [paramTemplateId, sessionWorkoutId, loading]);
 
-    initializeSession();
-  }, [paramWorkoutId, navigation]); // Roda quando a tela abre
-
-  // MUDANÇA AQUI: Esta função agora é chamada pelo "Modo Criação"
-  const createNewWorkoutSession = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error("Usuário não encontrado");
-    const today = getTodayDateString();
-    
-    const { data: newWorkout, error: createError } = await supabase
-      .from("workouts")
-      .insert({ user_id: user.id, workout_date: today })
-      .select("id")
-      .single();
-      
-    if (createError) throw createError;
-    
-    setSessionWorkoutId(newWorkout.id); // Define o ID da sessão
-    setGroupedWorkout([]); // Começa vazio
-  };
-
-  // MUDANÇA AQUI: Esta função (que tínhamos removido) está de volta
-  // É chamada pelo "Modo Edição"
-  const fetchAndGroupWorkoutData = async (currentWorkoutId: string) => {
-    const { data: exercises, error } = await supabase
-      .from("exercises")
-      .select(`
-        id,
-        name,
-        sets ( id, set_number, weight, reps, rpe, observations, performed_at )
-      `)
-      .eq("workout_id", currentWorkoutId)
-      .order("created_at", { ascending: true })
-      .order("performed_at", { referencedTable: "sets", ascending: true });
-
-    if (error) throw error;
-    setGroupedWorkout(exercises as GroupedWorkout);
-  };
-
-  // === LÓGICA PARA SALVAR UMA SÉRIE (Atualizada) ===
-  const handleSaveSet = async () => {
-    // MUDANÇA AQUI: Usa o 'sessionWorkoutId' do estado
-    if (!exerciseName || !weight || !reps || !sessionWorkoutId) {
-      return Alert.alert("Atenção", "Exercício, Peso e Repetições são obrigatórios.");
-    }
-    setSaving(true);
-    try {
-      // MUDANÇA AQUI: Passa o 'sessionWorkoutId'
-      const exerciseId = await getOrCreateExerciseId(sessionWorkoutId, exerciseName);
-      // (O resto da lógica é a mesma)
-      const existingExercise = groupedWorkout.find(ex => ex.id === exerciseId);
-      const nextSetNumber = (existingExercise ? existingExercise.sets.length : 0) + 1;
-      const newSetData = { exercise_id: exerciseId, set_number: nextSetNumber, weight: parseFloat(weight), reps: parseInt(reps, 10), rpe: rpe ? parseFloat(rpe) : undefined, observations: observations || undefined, };
-      const { data: createdSet, error: setError } = await supabase.from("sets").insert(newSetData).select().single();
-      if (setError) throw setError;
-      updateLocalStateWithNewSet(exerciseId, exerciseName, createdSet as SetData);
-      setWeight("");
-      setReps("");
-      setRpe("");
-      setObservations("");
-    } catch (e: any) {
-      Alert.alert("Erro ao salvar série", e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // (O restante do arquivo: getOrCreateExerciseId, updateLocalState, funções de deletar, renderização e estilos... permanecem os mesmos)
-  // ... (todas as outras funções que já escrevemos, como handleDeleteSet, handleDeleteExercise, etc., continuam aqui) ...
-  // (getOrCreateExerciseId e updateLocalStateWithNewSet permanecem os mesmos)
-  const getOrCreateExerciseId = async (currentWorkoutId: string, name: string): Promise<string> => {
-    const localMatch = groupedWorkout.find(ex => ex.name.toLowerCase() === name.toLowerCase());
-    if (localMatch) return localMatch.id;
-    const { data: dbMatch, error: findError } = await supabase.from("exercises").select("id").eq("workout_id", currentWorkoutId).eq("name", name).maybeSingle();
-    if (findError) throw findError;
-    if (dbMatch) return dbMatch.id;
-    const { data: newExercise, error: createError } = await supabase.from("exercises").insert({ workout_id: currentWorkoutId, name: name }).select("id").single();
-    if (createError) throw createError;
-    return newExercise.id;
-  };
-
-  const updateLocalStateWithNewSet = (exerciseId: string, name: string, newSet: SetData) => {
-    setGroupedWorkout(currentData => {
-      const exerciseExists = currentData.some(ex => ex.id === exerciseId);
-      if (exerciseExists) {
-        return currentData.map(ex => ex.id === exerciseId ? { ...ex, sets: [...ex.sets, newSet] } : ex);
+  useEffect(() => {
+    if (debouncedExerciseName.length >= 3 && !isAutocompleteFocused) {
+      const foundDefinition = allExerciseDefinitions.find(
+        (ex) => ex.exercise_name_lowercase === debouncedExerciseName.toLowerCase()
+      );
+      if (foundDefinition) {
+        const defId = foundDefinition.exercise_id;
+        if (currentDefinitionId !== defId) {
+          setCurrentDefinitionId(defId);
+          fetchQuickStats(defId);
+        }
       } else {
-        const newExercise: ExerciseData = { id: exerciseId, name: name, sets: [newSet] };
-        return [...currentData, newExercise];
+        if (currentDefinitionId !== null) {
+          setCurrentDefinitionId(null);
+          clearPeek();
+        }
       }
+    } else {
+      if (currentDefinitionId !== null) {
+        setCurrentDefinitionId(null);
+        clearPeek();
+      }
+    }
+  }, [debouncedExerciseName, isAutocompleteFocused, allExerciseDefinitions, fetchQuickStats, clearPeek, currentDefinitionId]);
+
+  useEffect(() => {
+    if (weight === '' || !reps) {
+      setBaseObservation((prevBase) => {
+        setObservations((prevObs) => (prevObs === prevBase ? '' : prevObs));
+        return '';
+      });
+      return;
+    }
+    const rawWeight = parseFloat(weight);
+    const repsNum = parseInt(reps, 10);
+    
+    if (isNaN(rawWeight) || isNaN(repsNum) || repsNum <= 0) return;
+    
+    let weightInKg = inputUnit === 'lbs' ? rawWeight * LBS_TO_KG_FACTOR : rawWeight;
+    weightInKg = Math.round(weightInKg * 10) / 10;
+    
+    const e1rm = calculateE1RM(weightInKg, repsNum);
+    if (!e1rm || !isFinite(e1rm)) return;
+    
+    const newBase = `e1RM estimada: ${e1rm.toFixed(1)} kg`;
+    setBaseObservation((oldBase) => {
+      setObservations((prevObs) => (!prevObs || prevObs === oldBase ? newBase : prevObs));
+      return newBase;
     });
-  };
-  
-  // (Funções de deletar série)
-  const handleDeleteSet = (setId: string, exerciseId: string) => {
-    Alert.alert( "Deletar Série", "Tem certeza que deseja deletar esta série?",
-      [ { text: "Cancelar", style: "cancel" },
-        { text: "Deletar", style: "destructive", 
-          onPress: async () => {
-            try {
-              const { error } = await supabase.from("sets").delete().eq("id", setId);
-              if (error) throw error;
-              updateLocalStateAfterSetDelete(setId, exerciseId);
-            } catch (e: any) { Alert.alert("Erro ao deletar", e.message); }
-          } 
-        }
-      ]
-    );
-  };
-  const updateLocalStateAfterSetDelete = (setId: string, exerciseId: string) => {
-    setGroupedWorkout(currentData => {
-      return currentData
-        .map(exercise => {
-          if (exercise.id === exerciseId) {
-            const updatedSets = exercise.sets.filter(set => set.id !== setId);
-            const renumberedSets = updatedSets.map((set, index) => ({ ...set, set_number: index + 1 }));
-            return { ...exercise, sets: renumberedSets };
-          }
-          return exercise;
-        })
-        .filter(exercise => exercise.sets.length > 0);
-    });
-  };
-  
-  // (Funções de deletar exercício)
-  const handleDeleteExercise = (exerciseId: string, exerciseName: string) => {
-    Alert.alert( "Deletar Exercício", `Tem certeza que deseja deletar "${exerciseName}" e todas as suas séries?`,
-      [ { text: "Cancelar", style: "cancel" },
-        { text: "Deletar", style: "destructive", 
-          onPress: async () => {
-            try {
-              const { error } = await supabase.from("exercises").delete().eq("id", exerciseId);
-              if (error) throw error;
-              updateLocalStateAfterExerciseDelete(exerciseId);
-            } catch (e: any) { Alert.alert("Erro ao deletar exercício", e.message); }
-          } 
-        }
-      ]
-    );
-  };
-  const updateLocalStateAfterExerciseDelete = (exerciseId: string) => {
-    setGroupedWorkout(currentData => {
-      return currentData.filter(exercise => exercise.id !== exerciseId);
-    });
+  }, [weight, reps, inputUnit]);
+
+  useEffect(() => {
+    const isUni = exerciseName.toLowerCase().includes('unilateral');
+    setIsUnilateral(isUni);
+    if (!isUni) setSide(null);
+  }, [exerciseName]);
+
+  const handleEditSet = useCallback((set: WorkoutSet, autoFillWeight?: string) => {
+    setExerciseName(groupedWorkout.find(ex => ex.id === set.exercise_id)?.name || '');
+    
+    const weightToUse = autoFillWeight !== undefined ? autoFillWeight : (set.weight === null ? '' : set.weight.toString());
+    setWeight(weightToUse);
+    
+    setReps(set.reps === 0 ? '' : set.reps.toString());
+    setRpe(set.rpe ? set.rpe.toString() : '');
+    setObservations(set.observations || '');
+    
+    if (set.side) { setIsUnilateral(true); setSide(set.side); } else { setIsUnilateral(false); setSide(null); }
+    setEditingSetId(set.id);
+    
+    const ex = groupedWorkout.find(e => e.id === set.exercise_id);
+    if (ex) {
+      setCurrentDefinitionId(ex.definition_id);
+      fetchQuickStats(ex.definition_id);
+    }
+  }, [groupedWorkout, fetchQuickStats]);
+
+  const handleCancelEdit = () => {
+    setEditingSetId(null);
+    setWeight(''); setReps(''); setRpe(''); setObservations(''); setSide(null);
   };
 
-  // (Função do menu de opções)
-  const handleOpenExerciseMenu = (exercise: ExerciseData) => {
-    Alert.alert(
-      `Opções para "${exercise.name}"`,
-      "O que você gostaria de fazer?",
-      [
-        {
-          text: "Editar Nome (usar como template)",
-          onPress: () => {
-            setExerciseName(exercise.name);
-            scrollViewRef.current?.scrollTo({ y: 0, animated: true });
-          }
-        },
-        {
-          text: "Deletar Exercício",
-          style: "destructive",
-          onPress: () => handleDeleteExercise(exercise.id, exercise.name)
-        },
-        {
-          text: "Cancelar",
-          style: "cancel"
-        }
-      ]
-    );
+  const handlePopulateForm = useCallback((name: string, defId: string) => {
+    setExerciseName(name);
+    setCurrentDefinitionId(defId);
+    fetchQuickStats(defId);
+    
+    setWeight(''); 
+    setReps(''); 
+    setRpe(''); 
+    setObservations(''); 
+    setSide(null); 
+    setEditingSetId(null); 
+
+    Haptics.selectionAsync();
+  }, [fetchQuickStats]);
+  
+  const handleClearForm = useCallback(() => {
+    setExerciseName(''); setCurrentDefinitionId(null); setWeight(''); setReps(''); setRpe(''); setObservations(''); setSide(null); setEditingSetId(null); clearPeek();
+  }, [clearPeek]);
+
+  const handleShareSet = useCallback((set: WorkoutSet, isPR: boolean, exName: string, defId: string) => {
+      setDefinitionIdToShare(defId);
+      if (isPR) {
+        handleOpenSetShareModal(set, true, exName, sessionWorkoutId); 
+      } else {
+        handleOpenProgressionShareModal(set, exName, defId);
+      }
+  }, [handleOpenSetShareModal, handleOpenProgressionShareModal, sessionWorkoutId]);
+
+  const handleShowCoachInstructions = useCallback(() => {
+    if (!currentDefinitionId) return;
+    const plan = prescriptions[currentDefinitionId];
+    const metaText = plan ? `Meta: ${plan.sets_count || '?'} sets x ${plan.reps_range || '?'} reps` : 'Sem meta definida';
+    const notes = plan?.notes || (plan as any)?.default_notes || 'Sem observações.';
+    const video = (plan as any)?.video_url;
+    Alert.alert('Instruções do Treino', `${metaText}\n\n📝 ${notes}${video ? '\n\n🎥 Há um vídeo disponível.' : ''}`, [{ text: 'Fechar', style: 'cancel' }, video ? { text: 'Ver Vídeo', onPress: () => Linking.openURL(video) } : { text: 'OK' }]);
+  }, [currentDefinitionId, prescriptions]);
+
+  const handleSaveAndRest = async () => {
+    if (!exerciseName || weight === '' || !reps || !sessionWorkoutId) {
+      Alert.alert(t.common.attention, t.logWorkout.formValidation);
+      return;
+    }
+    if (isUnilateral && !side) {
+      Alert.alert(t.common.attention, t.logWorkout.unilateralValidation);
+      return;
+    }
+
+    await handleSaveSet(); 
+    
+    const plannedRest = currentDefinitionId ? prescriptions[currentDefinitionId]?.rest_seconds : undefined;
+    startTimer(plannedRest || undefined); 
   };
 
-  // === RENDERIZAÇÃO ===
-  
-  if (loading) {
-    return <View style={styles.container}><ActivityIndicator /></View>;
-  }
+  const handleSaveSet = useCallback(async () => {
+    if (loadingStats) return;
+    
+    if (!exerciseName || weight === '' || !reps || !sessionWorkoutId) {
+      return Alert.alert(t.common.attention, t.logWorkout.formValidation);
+    }
+    if (isUnilateral && !side) {
+      return Alert.alert(t.common.attention, t.logWorkout.unilateralValidation);
+    }
+
+    setSaving(true);
+    let definitionId = currentDefinitionId;
+
+    try {
+      if (!definitionId) {
+        const newDefinition = await handleCreateDefinition(exerciseName);
+        if (!newDefinition) throw new Error('Falha ao criar exercício.');
+        definitionId = newDefinition.exercise_id;
+        setCurrentDefinitionId(definitionId);
+      }
+
+      if (!definitionId) throw new Error('ID de definição não encontrado.');
+
+      const exerciseInstanceId = await getOrCreateExerciseInWorkout(sessionWorkoutId, definitionId);
+      
+      const rawWeight = parseFloat(weight);
+      if (isNaN(rawWeight)) throw new Error('Peso inválido.');
+
+      let weightInKg = inputUnit === 'lbs' ? rawWeight * LBS_TO_KG_FACTOR : rawWeight;
+      weightInKg = Math.round(weightInKg * 100) / 100;
+
+      const commonData = {
+        weight: weightInKg,
+        reps: parseInt(reps, 10),
+        rpe: rpe ? parseFloat(rpe) : undefined,
+        observations: observations || undefined,
+        side: isUnilateral && side ? side : undefined,
+      };
+
+      let savedSet: WorkoutSet;
+      if (editingSetId) {
+        savedSet = await updateSet(editingSetId, commonData) as WorkoutSet;
+      } else {
+        const existingExercise = groupedWorkout.find((ex) => ex.id === exerciseInstanceId);
+        const nextSetNumber = (existingExercise ? existingExercise.sets.length : 0) + 1;
+        savedSet = await saveSet({
+          exercise_id: exerciseInstanceId,
+          set_number: nextSetNumber,
+          ...commonData
+        });
+      }
+
+      const pr = classifyPR(
+        savedSet.weight, 
+        savedSet.reps, 
+        exerciseStats
+      );
+
+      if (pr.isPR) {
+        setPrSetIds((prev) => new Set(prev).add(savedSet.id));
+        invalidateCache(definitionId);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+
+      const updatedData = await fetchAndGroupWorkoutData(sessionWorkoutId);
+      setGroupedWorkout(updatedData);
+
+      const plan = prescriptions[definitionId];
+      const targetSets = plan?.sets_count || 0;
+      
+      if (targetSets > 0 && savedSet.set_number === targetSets) {
+        const currentExIndex = updatedData.findIndex(ex => ex.id === exerciseInstanceId);
+        const nextExercise = updatedData[currentExIndex + 1];
+        
+        if (nextExercise) {
+          Alert.alert(
+            'Exercício Concluído! 🎉',
+            `Você finalizou as ${targetSets} séries.`,
+            [
+              { text: 'Add Extra', style: 'cancel', onPress: () => { handleCancelEdit(); setReps(''); setRpe(''); } },
+              { text: `Ir p/ ${nextExercise.name}`, onPress: () => {
+                  if (nextExercise.sets.length > 0) handleEditSet(nextExercise.sets[0]);
+                  else handlePopulateForm(nextExercise.name, nextExercise.definition_id);
+              }}
+            ]
+          );
+          return;
+        } else {
+           Alert.alert('Treino Concluído! 🏆', 'Todos os exercícios finalizados.', [{ text: 'Continuar', style: 'cancel' }, { text: 'Finalizar', onPress: handleFinishWorkout }]);
+          return;
+        }
+      }
+
+      const exerciseUpdated = updatedData.find(ex => ex.id === exerciseInstanceId);
+      if (editingSetId && exerciseUpdated) {
+        const nextSet = exerciseUpdated.sets.find(s => s.set_number === savedSet.set_number + 1);
+        if (nextSet && nextSet.weight === 0 && nextSet.reps === 0) handleEditSet(nextSet, weight); 
+        else handleCancelEdit();
+      } else {
+        setReps(''); setRpe(''); setObservations(baseObservation);
+      }
+
+    } catch (e: any) { Alert.alert(t.common.error, e.message); } finally { setSaving(false); }
+  }, [sessionWorkoutId, exerciseName, weight, reps, rpe, observations, inputUnit, isUnilateral, side, groupedWorkout, exerciseStats, loadingStats, baseObservation, setGroupedWorkout, setPrSetIds, currentDefinitionId, handleCreateDefinition, invalidateCache, editingSetId, prescriptions, handleCancelEdit, handleEditSet, handlePopulateForm]);
+
+  const handleDeleteSet = useCallback(async (setId: string, exerciseId: string, definitionId: string) => {
+    try {
+      await deleteSet(setId);
+      const updatedData = await fetchAndGroupWorkoutData(sessionWorkoutId!);
+      setGroupedWorkout(updatedData);
+      invalidateCache(definitionId);
+    } catch (e: any) { Alert.alert('Erro', e.message); }
+  }, [setGroupedWorkout, invalidateCache, sessionWorkoutId]);
+
+  const handleDeleteExercise = useCallback(async (exerciseInstanceId: string, exerciseName: string) => {
+      try {
+        await deleteExercise(exerciseInstanceId);
+        setGroupedWorkout((currentData) => currentData.filter((ex) => ex.id !== exerciseInstanceId));
+      } catch (e: any) { Alert.alert('Erro', e.message); }
+  }, [setGroupedWorkout]);
+
+  const handleShowFormAnalytics = useCallback(() => {
+    if (!currentDefinitionId) return;
+    analyticsSheetRef.current?.openSheet(currentDefinitionId, exerciseName, null);
+  }, [currentDefinitionId, exerciseName]);
+
+  const handleShowLogAnalytics = useCallback((definitionId: string, name: string) => {
+    analyticsSheetRef.current?.openSheet(definitionId, name);
+  }, []);
+
+  const handleFinishWorkout = () => {
+    navigation.replace('WorkoutHistory', { highlightWorkoutId: sessionWorkoutId || paramWorkoutId });
+  };
+
+  const onDragEnd = async ({ data }: { data: WorkoutExercise[] }) => {
+    setGroupedWorkout(data);
+    setIsReordering(true);
+    const updates = data.map((ex, index) => ({ id: ex.id, order: index }));
+    try {
+      await reorderWorkoutExercises(updates);
+    } catch (e: any) {
+      console.error('Erro ao reordenar:', e.message);
+      Alert.alert('Erro', 'Falha ao salvar a nova ordem.');
+    } finally {
+      setIsReordering(false);
+    }
+  };
+
+  // --- HINT INTELIGENTE ---
+  const templateHint = useMemo(() => {
+    // 1. Prioridade: Prescrição do Coach (Meta do dia)
+    if (currentPlan) {
+      return `Meta: ${currentPlan.sets_count || '?'} x ${currentPlan.reps_range || '?'} @ RPE ${currentPlan.rpe_target || '?'}`;
+    }
+    
+    // 2. Prioridade: Melhor e1RM Histórico (Recuperado dos Stats)
+    if (exerciseStats && exerciseStats.max_reps_by_weight) {
+      // Precisamos encontrar qual combinação peso/reps gerou o melhor e1RM para exibir
+      let bestSet = { weight: 0, reps: 0, e1rm: 0 };
+      
+      Object.entries(exerciseStats.max_reps_by_weight).forEach(([wStr, r]) => {
+        const w = parseFloat(wStr);
+        const e = calculateE1RM(w, r);
+        if (e > bestSet.e1rm) {
+          bestSet = { weight: w, reps: r, e1rm: e };
+        }
+      });
+
+      if (bestSet.weight > 0) {
+        // AQUI ESTÁ A MUDANÇA: Texto explícito
+        return `Melhor série: ${bestSet.weight} kg pra ${bestSet.reps} reps (e1RM ${bestSet.e1rm.toFixed(0)} kg)`;
+      }
+    }
+    
+    return '';
+  }, [currentPlan, exerciseStats]);
+
+  if (loading) return <View style={styles.loadingContainer}><ActivityIndicator size="large" /></View>;
+
+  const workoutFormProps: WorkoutFormProps = {
+    exerciseName,
+    setExerciseName,
+    weight,
+    setWeight,
+    reps,
+    setReps,
+    rpe,
+    setRpe,
+    observations,
+    setObservations,
+    saving,
+    handleSaveSet,
+    onSaveAndRest: handleSaveAndRest,
+    allExerciseNames,
+    isAutocompleteFocused,
+    setIsAutocompleteFocused,
+    loadingPerformance: loadingStats,
+    lastPerformance: [],
+    bestPerformance: null,
+    handleShowInfoModal: handleShowFormAnalytics,
+    templateHint: templateHint,
+    isTemplateMode: false,
+    isUnilateral,
+    side,
+    setSide,
+    inputUnit,
+    setInputUnit,
+    isEditing: !!editingSetId,
+    onCancelEdit: handleCancelEdit,
+    onShowCoachInstructions: currentPlan ? handleShowCoachInstructions : undefined,
+    onClear: handleClearForm,
+  };
 
   return (
-    <ScrollView style={styles.container} ref={scrollViewRef}>
-      {/* Formulário (sem mudança) */}
-      <View style={styles.form}>
-        <Text style={styles.label}>Exercício</Text>
-        <TextInput style={styles.input} placeholder="Ex.: Agachamento" value={exerciseName} onChangeText={setExerciseName} />
-        <Text style={styles.label}>Peso (kg)</Text>
-        <TextInput style={styles.input} placeholder="Ex.: 100" keyboardType="numeric" value={weight} onChangeText={setWeight} />
-        <Text style={styles.label}>Repetições</Text>
-        <TextInput style={styles.input} placeholder="Ex.: 5" keyboardType="number-pad" value={reps} onChangeText={setReps} />
-        <Text style={styles.label}>RPE (opcional)</Text>
-        <TextInput style={styles.input} placeholder="Ex.: 7.5" keyboardType="numeric" value={rpe} onChangeText={setRpe} />
-        <Text style={styles.label}>Observações (opcional)</Text>
-        <TextInput style={[styles.input, styles.multiline]} placeholder="Técnica, dor, cadência..." multiline value={observations} onChangeText={setObservations} />
-        <TouchableOpacity style={[styles.buttonPrimary, saving ? styles.buttonDisabled : {}]} onPress={handleSaveSet} disabled={saving}>
-          <Text style={styles.buttonTextPrimary}>{saving ? "Salvando..." : "Salvar série"}</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Log de Treino */}
-      <View style={styles.logContainer}>
-        {/* MUDANÇA AQUI: Título dinâmico */}
-        <Text style={styles.logTitle}>{paramWorkoutId ? "Editando Treino" : "Nova Sessão"} ({getTodayDateString()})</Text>
-
-        {groupedWorkout.length === 0 && (
-          <Text style={styles.emptyText}>Nenhuma série registrada ainda.</Text>
-        )}
-        
-        {groupedWorkout.map((exercise) => (
-          <View key={exercise.id} style={styles.exerciseCard}>
-            <View style={styles.exerciseHeader}>
-              <Text style={styles.exerciseName}>{exercise.name}</Text>
-              <TouchableOpacity 
-                style={styles.deleteExerciseButton}
-                onPress={() => handleOpenExerciseMenu(exercise)}
-              >
-                <Feather name="more-vertical" size={20} color="#555" />
-              </TouchableOpacity>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
+      <DraggableFlatList
+        data={groupedWorkout}
+        onDragEnd={onDragEnd}
+        keyExtractor={(item) => item.id}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.listContentContainer}
+        onScrollBeginDrag={() => setIsAutocompleteFocused(false)}
+        ListHeaderComponent={
+          <>
+            <WorkoutForm {...workoutFormProps} />
+            <View style={styles.logContainer}>
+              <Text style={styles.logTitle}>{paramWorkoutId ? t.logWorkout.logTitleEdit : (paramTemplateId ? 'Treino Prescrito' : t.logWorkout.logTitleNew)}</Text>
+              {loadingPrescription && <ActivityIndicator size="small" color="#007AFF" style={{marginBottom: 10}} />}
+              {groupedWorkout.length === 0 && !loadingPrescription && <Text style={styles.emptyText}>{t.logWorkout.emptyLog}</Text>}
             </View>
-            
-            {exercise.sets.map((set) => (
-              <View key={set.id} style={styles.setRow}>
-                <View style={styles.setRowContent}>
-                  <View style={styles.setTextContainer}>
-                    <Text style={styles.setText}>
-                      <Text style={{fontWeight: 'bold'}}>Série {set.set_number}:</Text> {set.weight}kg x {set.reps} reps {set.rpe ? `@ RPE ${set.rpe}` : ''}
-                    </Text>
-                    {set.observations && (<Text style={styles.obsText}>↳ {set.observations}</Text>)}
-                    <Text style={styles.timeText}>{new Date(set.performed_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</Text>
-                  </View>
-                  <TouchableOpacity 
-                    style={styles.deleteSetButton}
-                    onPress={() => handleDeleteSet(set.id, exercise.id)}
-                  >
-                    <Feather name="trash-2" size={20} color="#FF3B30" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
+          </>
+        }
+        renderItem={({ item, drag, isActive }: RenderItemParams<WorkoutExercise>) => (
+          <ExerciseCard
+            exercise={item}
+            activeTemplate={false}
+            prSetIds={prSetIds}
+            isFetchingShareData={isFetchingShareData}
+            onShowAnalytics={handleShowLogAnalytics}
+            onEditSet={handleEditSet}
+            onShareSet={handleShareSet}
+            onDeleteSet={handleDeleteSet}
+            onPopulateForm={handlePopulateForm}
+            drag={drag}
+            isActive={isActive}
+          />
+        )}
+        ListFooterComponent={
+          <View style={styles.footer}>
+            <TouchableOpacity style={styles.buttonSecondary} onPress={handleFinishWorkout}>
+              <Text style={styles.buttonTextSecondary}>{paramWorkoutId ? t.logWorkout.updateWorkoutButton : t.logWorkout.finishWorkoutButton}</Text>
+            </TouchableOpacity>
           </View>
-        ))}
-      </View>
+        }
+      />
+      
+      <ExerciseAnalyticsSheet ref={analyticsSheetRef} />
+      <SetShareModal
+        visible={isSetShareModalVisible}
+        onClose={handleCloseSetShareModal}
+        exerciseName={exerciseNameToShare}
+        set={setToshare}
+        definitionId={definitionIdToShare}
+        isPR={isSharingPR}
+      />
+      <ProgressionShareModal
+        visible={isProgressionShareModalVisible}
+        onClose={handleCloseProgressionShareModal}
+        exerciseName={exerciseNameToShare}
+        set={setToshare}
+        progression={progressionDataForModal}
+        currentSessionTEV={currentSessionTEV}
+      />
+    </KeyboardAvoidingView>
+  );
+};
 
-      {/* Rodapé */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.buttonSecondary} onPress={() => navigation.navigate("Home")}>
-          {/* MUDANÇA AQUI: Título do botão */}
-          <Text style={styles.buttonTextSecondary}>{paramWorkoutId ? "Salvar Edições" : "Finalizar Treino"}</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
+export default function LogWorkout(props: NativeStackScreenProps<RootStackParamList, 'LogWorkout'>) {
+  return (
+    <BottomSheetModalProvider>
+      <LogWorkoutScreen {...props} />
+    </BottomSheetModalProvider>
   );
 }
 
-// (Estilos permanecem os mesmos)
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', },
-  form: { padding: 20, borderBottomWidth: 1, borderBottomColor: '#eee', gap: 8, },
-  label: { fontSize: 16, fontWeight: '600', color: '#333', },
-  input: { borderWidth: 1, borderColor: '#ccc', paddingHorizontal: 12, paddingVertical: 14, borderRadius: 10, fontSize: 16, marginBottom: 8, },
-  multiline: { height: 80, textAlignVertical: 'top', },
-  logContainer: { padding: 20, },
-  logTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, },
-  emptyText: { fontSize: 16, color: '#777', textAlign: 'center', },
-  exerciseCard: { backgroundColor: '#f9f9f9', borderRadius: 8, padding: 16, marginBottom: 16, },
-  exerciseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#eee', paddingBottom: 8, marginBottom: 12, },
-  exerciseName: { fontSize: 18, fontWeight: 'bold', flex: 1, },
-  deleteExerciseButton: { padding: 8, marginLeft: 10, },
-  setRow: { marginBottom: 10, },
-  setRowContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', },
-  setTextContainer: { flex: 1, marginRight: 10, },
-  setText: { fontSize: 16, color: '#333', },
-  obsText: { fontSize: 14, color: '#555', fontStyle: 'italic', marginLeft: 10, marginTop: 2, },
-  timeText: { fontSize: 12, color: '#888', marginTop: 2, },
-  deleteSetButton: { padding: 8, },
-  footer: { padding: 20, paddingTop: 0, marginTop: 10, marginBottom: 20, },
-  buttonPrimary: { backgroundColor: '#007AFF', paddingVertical: 14, borderRadius: 10, alignItems: 'center', },
-  buttonTextPrimary: { color: '#fff', fontSize: 16, fontWeight: '600', },
-  buttonSecondary: { backgroundColor: '#fff', paddingVertical: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#007AFF', },
-  buttonTextSecondary: { color: '#007AFF', fontSize: 16, fontWeight: '600', },
-  buttonDisabled: { backgroundColor: '#A9A9A9', }
+  container: { flex: 1, backgroundColor: '#fff' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  listContentContainer: { paddingBottom: 20 },
+  logContainer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 0 },
+  logTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16 },
+  emptyText: { fontSize: 16, color: '#777', textAlign: 'center', marginTop: 10, marginBottom: 10 },
+  footer: { padding: 20, paddingTop: 0, marginTop: 10 },
+  buttonSecondary: { backgroundColor: '#fff', paddingVertical: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#007AFF', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  buttonTextSecondary: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
 });

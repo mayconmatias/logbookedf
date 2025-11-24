@@ -1,19 +1,16 @@
 module.exports = function (api) {
   api.cache(true);
   return {
-    presets: ["babel-preset-expo"],
-    
-    // ADICIONE ISTO:
+    presets: ['babel-preset-expo'],
     plugins: [
       [
-        "module-resolver",
+        'module-resolver',
         {
-          root: ["./"],
-          alias: {
-            "@": "./src"
-          }
-        }
-      ]
-    ]
+          root: ['./'],
+          alias: { '@': './src' },
+        },
+      ],
+      ['react-native-reanimated/plugin'], // <-- A sintaxe correta
+    ],
   };
 };

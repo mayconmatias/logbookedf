@@ -1,0 +1,35 @@
+{
+  "cli": {
+    "version": ">= 7.6.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "distribution": "store",
+      // [CORREÇÃO CRÍTICA DO XCODE/SDK]
+      "ios": {
+        "image": "latest", 
+        "resourceClass": "large",
+        "cocoapods": "1.16.2",
+        "simulator": false,
+        "autoIncrement": true
+      },
+      "android": {
+        "buildType": "app-bundle" // Garante o formato .AAB para Google Play Console
+      }
+    },
+    "internal": {
+      "distribution": "internal"
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
