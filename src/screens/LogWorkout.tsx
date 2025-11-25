@@ -17,7 +17,6 @@ import {
   Linking,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { useDebounce } from 'use-debounce';
 import * as Haptics from 'expo-haptics';
 import DraggableFlatList, { 
@@ -58,10 +57,10 @@ import { fetchAndGroupWorkoutData } from '@/services/workouts.service';
 import { calculateE1RM, LBS_TO_KG_FACTOR } from '@/utils/e1rm';
 import { classifyPR } from '@/services/records.service';
 
-const LogWorkoutScreen = ({
-  navigation,
-  route,
-}: NativeStackScreenProps<RootStackParamList, 'LogWorkout'>) => {
+type Props = NativeStackScreenProps<RootStackParamList, 'LogWorkout'>;
+
+// [CORREÇÃO] Mantemos apenas este export default
+export default function LogWorkoutScreen({ navigation, route }: Props) {
   const { workoutId: paramWorkoutId, templateId: paramTemplateId } = route.params || {};
   const { startTimer } = useTimer();
 
@@ -203,12 +202,13 @@ const LogWorkoutScreen = ({
         }
       }
     } else {
-      if (currentDefinitionId !== null) {
+      // Se o usuário limpar o campo, reseta o ID
+      if (!exerciseName && currentDefinitionId !== null) {
         setCurrentDefinitionId(null);
         clearPeek();
       }
     }
-  }, [debouncedExerciseName, isAutocompleteFocused, allExerciseDefinitions, fetchQuickStats, clearPeek, currentDefinitionId]);
+  }, [debouncedExerciseName, isAutocompleteFocused, allExerciseDefinitions, fetchQuickStats, clearPeek, currentDefinitionId, exerciseName]);
 
   useEffect(() => {
     if (weight === '' || !reps) {
@@ -224,7 +224,7 @@ const LogWorkoutScreen = ({
     if (isNaN(rawWeight) || isNaN(repsNum) || repsNum <= 0) return;
     
     let weightInKg = inputUnit === 'lbs' ? rawWeight * LBS_TO_KG_FACTOR : rawWeight;
-    weightInKg = Math.round(weightInKg * 10) / 10;
+    weightInKg = Math.round(weightInKg * 100) / 100;
     
     const e1rm = calculateE1RM(weightInKg, repsNum);
     if (!e1rm || !isFinite(e1rm)) return;
@@ -334,10 +334,24 @@ const LogWorkoutScreen = ({
     let definitionId = currentDefinitionId;
 
     try {
+      // --- FIX PARA O BUG DE EXERCÍCIO ERRADO ---
+      if (definitionId) {
+        const currentDefInCatalog = allExerciseDefinitions.find(ex => ex.exercise_id === definitionId);
+        if (currentDefInCatalog && currentDefInCatalog.exercise_name_lowercase !== exerciseName.trim().toLowerCase()) {
+           definitionId = null; 
+        }
+      }
+      
       if (!definitionId) {
-        const newDefinition = await handleCreateDefinition(exerciseName);
-        if (!newDefinition) throw new Error('Falha ao criar exercício.');
-        definitionId = newDefinition.exercise_id;
+        const existingDef = allExerciseDefinitions.find(ex => ex.exercise_name_lowercase === exerciseName.trim().toLowerCase());
+        
+        if (existingDef) {
+          definitionId = existingDef.exercise_id;
+        } else {
+          const newDefinition = await handleCreateDefinition(exerciseName);
+          if (!newDefinition) throw new Error('Falha ao criar exercício.');
+          definitionId = newDefinition.exercise_id;
+        }
         setCurrentDefinitionId(definitionId);
       }
 
@@ -422,8 +436,12 @@ const LogWorkoutScreen = ({
         setReps(''); setRpe(''); setObservations(baseObservation);
       }
 
-    } catch (e: any) { Alert.alert(t.common.error, e.message); } finally { setSaving(false); }
-  }, [sessionWorkoutId, exerciseName, weight, reps, rpe, observations, inputUnit, isUnilateral, side, groupedWorkout, exerciseStats, loadingStats, baseObservation, setGroupedWorkout, setPrSetIds, currentDefinitionId, handleCreateDefinition, invalidateCache, editingSetId, prescriptions, handleCancelEdit, handleEditSet, handlePopulateForm]);
+    } catch (e: any) { 
+      Alert.alert(t.common.error, e.message); 
+    } finally { 
+      setSaving(false); 
+    }
+  }, [sessionWorkoutId, exerciseName, weight, reps, rpe, observations, inputUnit, isUnilateral, side, groupedWorkout, exerciseStats, loadingStats, baseObservation, setGroupedWorkout, setPrSetIds, currentDefinitionId, handleCreateDefinition, invalidateCache, editingSetId, prescriptions, handleCancelEdit, handleEditSet, handlePopulateForm, allExerciseDefinitions]);
 
   const handleDeleteSet = useCallback(async (setId: string, exerciseId: string, definitionId: string) => {
     try {
@@ -468,18 +486,13 @@ const LogWorkoutScreen = ({
     }
   };
 
-  // --- HINT INTELIGENTE ---
   const templateHint = useMemo(() => {
-    // 1. Prioridade: Prescrição do Coach (Meta do dia)
     if (currentPlan) {
       return `Meta: ${currentPlan.sets_count || '?'} x ${currentPlan.reps_range || '?'} @ RPE ${currentPlan.rpe_target || '?'}`;
     }
     
-    // 2. Prioridade: Melhor e1RM Histórico (Recuperado dos Stats)
     if (exerciseStats && exerciseStats.max_reps_by_weight) {
-      // Precisamos encontrar qual combinação peso/reps gerou o melhor e1RM para exibir
       let bestSet = { weight: 0, reps: 0, e1rm: 0 };
-      
       Object.entries(exerciseStats.max_reps_by_weight).forEach(([wStr, r]) => {
         const w = parseFloat(wStr);
         const e = calculateE1RM(w, r);
@@ -487,13 +500,10 @@ const LogWorkoutScreen = ({
           bestSet = { weight: w, reps: r, e1rm: e };
         }
       });
-
       if (bestSet.weight > 0) {
-        // AQUI ESTÁ A MUDANÇA: Texto explícito
         return `Melhor série: ${bestSet.weight} kg pra ${bestSet.reps} reps (e1RM ${bestSet.e1rm.toFixed(0)} kg)`;
       }
     }
-    
     return '';
   }, [currentPlan, exerciseStats]);
 
@@ -596,14 +606,6 @@ const LogWorkoutScreen = ({
     </KeyboardAvoidingView>
   );
 };
-
-export default function LogWorkout(props: NativeStackScreenProps<RootStackParamList, 'LogWorkout'>) {
-  return (
-    <BottomSheetModalProvider>
-      <LogWorkoutScreen {...props} />
-    </BottomSheetModalProvider>
-  );
-}
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },

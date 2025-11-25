@@ -10,6 +10,7 @@ module.exports = function (api) {
           alias: { '@': './src' },
         },
       ],
+      // O Reanimated DEVE ser o último item do array
       'react-native-reanimated/plugin',
     ],
   };

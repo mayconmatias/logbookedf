@@ -2,7 +2,6 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-// Tipos globais
 import type { WorkoutHistoryItem } from '@/types/workout';
 import type {
   HistoricalRepPR as RepPR,
@@ -25,9 +24,6 @@ interface GroupedSet {
   side?: 'E' | 'D';
 }
 
-/**
- * Agrupa séries idênticas e calcula tags de PR.
- */
 const getGroupedSetsData = (
   definitionId: string,
   sets: any[],
@@ -42,7 +38,6 @@ const getGroupedSetsData = (
     weightPRs.find(pr => pr.definition_id === definitionId)?.max_weight || 0;
 
   sets.forEach(set => {
-    // Ignora séries zeradas (ghost sets)
     if (set.weight === 0 && set.reps === 0) return;
 
     const side = set.side || undefined;
@@ -54,7 +49,6 @@ const getGroupedSetsData = (
     if (existing) {
       existing.count += 1;
     } else {
-      // CORREÇÃO DO BUG RP: Busca o recorde de reps PARA ESTE PESO ESPECÍFICO
       const historicalRepPR =
         repPRs.find(
           pr =>
@@ -64,12 +58,9 @@ const getGroupedSetsData = (
 
       let tag = '';
 
-      // 1. RP de Carga Absoluta
       if (set.weight > historicalWeightPR && historicalWeightPR > 0) {
         tag = ' (RP)';
       } 
-      // 2. RP de Repetições (com mesmo peso)
-      // Só marca se já existia um histórico (>0) e superamos ele.
       else if (historicalRepPR > 0 && set.reps > historicalRepPR) {
         tag = ' (RP de reps)';
       }
@@ -84,7 +75,6 @@ const getGroupedSetsData = (
     }
   });
 
-  // Ordena por peso (decrescente) para mostrar as séries mais pesadas primeiro
   groups.sort((a, b) => b.weight - a.weight);
 
   return groups;
@@ -110,13 +100,16 @@ export default function ShareableCard({
   const workoutName = getWorkoutName();
 
   const renderWorkoutBody = () => {
-    const MAX_LINES_TOTAL = 18; // Limite total do card
-    const MAX_LINES_PER_EXERCISE = 3; // Limite específico por exercício
+    const MAX_LINES_TOTAL = 18; 
+    const MAX_LINES_PER_EXERCISE = 3; 
 
     const performed = (workout as any).performed_data || [];
 
     let currentTotalLines = 0;
-    const items: JSX.Element[] = [];
+    
+    // [CORREÇÃO] Uso de React.JSX.Element para compatibilidade com React 19
+    const items: React.JSX.Element[] = [];
+    
     let remainingExercises = 0;
     let stopRenderingExercises = false;
 
@@ -129,41 +122,33 @@ export default function ShareableCard({
       const sets = ex.sets || [];
       if (!sets.length) continue;
 
-      // 1. Processa os grupos de séries
       const groups = getGroupedSetsData(ex.definition_id, sets, repPRs, weightPRs);
       
-      // 2. Aplica a lógica de truncamento do exercício (Máx 3 linhas)
       let linesToRender: string[] = [];
       
       if (groups.length <= MAX_LINES_PER_EXERCISE) {
-        // Caso caiba tudo
         linesToRender = groups.map(g => {
           const side = g.side ? ` (${g.side})` : '';
           return `${g.count} x ${g.weight}kg para ${g.reps} reps${side}${g.tag}`;
         });
       } else {
-        // Caso estoure 3 linhas: Pega as 2 primeiras (mais pesadas) e resume o resto
         const topGroups = groups.slice(0, MAX_LINES_PER_EXERCISE - 1);
         const restGroups = groups.slice(MAX_LINES_PER_EXERCISE - 1);
 
-        // Formata as top (com detalhe completo)
         linesToRender = topGroups.map(g => {
           const side = g.side ? ` (${g.side})` : '';
           return `${g.count} x ${g.weight}kg para ${g.reps} reps${side}${g.tag}`;
         });
 
-        // [CORREÇÃO]: Cria o resumo da sobra SEM PESO
         const totalSetsRest = restGroups.reduce((acc, g) => acc + g.count, 0);
         const minReps = Math.min(...restGroups.map(g => g.reps));
         const maxReps = Math.max(...restGroups.map(g => g.reps));
         
         const repsRange = minReps === maxReps ? `${minReps}` : `${minReps}-${maxReps}`;
         
-        // Ex: "+ 3 séries de 10-12 reps"
         linesToRender.push(`+ ${totalSetsRest} séries de ${repsRange} reps`);
       }
 
-      // 3. Verifica se cabe no card inteiro
       const exerciseCost = 1 + linesToRender.length;
 
       if (currentTotalLines + exerciseCost <= MAX_LINES_TOTAL) {

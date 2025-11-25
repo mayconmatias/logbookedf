@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -7,12 +7,12 @@ import "react-native-url-polyfill/auto";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as Linking from 'expo-linking';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { registerRootComponent } from 'expo';
 
 import { TimerProvider } from '@/context/TimerContext';
 import RestTimer from '@/components/RestTimer';
 import * as Notifications from 'expo-notifications';
 
-// [NOVO] Import do Gate
 import BiometricGate from '@/components/BiometricGate';
 
 import { useFonts } from 'expo-font';
@@ -42,8 +42,9 @@ import CoachPaywallScreen from '@/screens/CoachPaywallScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+// [CORREÇÃO CRÍTICA] Adicionado o esquema nativo explícito 'logbookedf://'
 const linking = {
-  prefixes: [Linking.createURL('/')],
+  prefixes: ['logbookedf://', Linking.createURL('/')],
   config: {
     screens: {
       ResetPassword: 'reset-password',
@@ -56,6 +57,9 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+    priority: Notifications.AndroidNotificationPriority.HIGH,
   }),
 });
 
@@ -120,8 +124,6 @@ export default function App() {
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <TimerProvider>
-          {/* [NOVO] Envolvemos tudo no Gate Biométrico */}
-          {/* sessionActive={!!session} faz com que ele só ative se tiver usuário logado */}
           <BiometricGate sessionActive={!!session}>
             <NavigationContainer linking={linking}>
               {session ? (
@@ -160,7 +162,6 @@ export default function App() {
               )}
             </NavigationContainer>
             
-            {/* Timer só aparece se tiver sessão e estiver desbloqueado (Gate cuida do visual) */}
             {session && <RestTimer />}
           </BiometricGate>
           

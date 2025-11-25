@@ -5,16 +5,19 @@ import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// [CORREÇÃO] Adicionadas propriedades obrigatórias para o Expo 54
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
 const PRESETS_KEY = '@timer_presets';
-const DEFAULT_PRESETS = [60, 90, 120, 180, 300]; // 1m, 1m30, 2m, 3m, 5m
+const DEFAULT_PRESETS = [60, 90, 120, 180, 300]; 
 
 interface TimerContextData {
   secondsRemaining: number;
@@ -27,7 +30,7 @@ interface TimerContextData {
   startTimer: (seconds?: number) => void;
   stopTimer: () => void;
   selectPreset: (index: number) => void;
-  updatePresets: (newPresets: number[]) => Promise<void>; // [NOVO]
+  updatePresets: (newPresets: number[]) => Promise<void>;
 }
 
 const TimerContext = createContext<TimerContextData>({} as TimerContextData);
@@ -36,7 +39,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [isActive, setIsActive] = useState(false);
   
-  // [ATUALIZADO] Agora inicia com padrão, mas carrega do storage
   const [presets, setPresets] = useState<number[]>(DEFAULT_PRESETS);
   const [activePresetIndex, setActivePresetIndex] = useState(0);
   const [isPro, setIsPro] = useState(false);
@@ -44,17 +46,14 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const timerInterval = useRef<NodeJS.Timeout | null>(null);
   const notificationScheduled = useRef(false);
 
-  // Carregar presets salvos e plano PRO
   useEffect(() => {
     const initialize = async () => {
       try {
-        // 1. Carregar Presets
         const savedPresets = await AsyncStorage.getItem(PRESETS_KEY);
         if (savedPresets) {
           setPresets(JSON.parse(savedPresets));
         }
 
-        // 2. Checar Plano
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data } = await supabase
@@ -69,14 +68,11 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     initialize();
   }, []);
 
-  // [NOVO] Função para salvar novos presets
   const updatePresets = async (newPresets: number[]) => {
-    // Ordena do menor para o maior para ficar bonito no menu
     const sorted = [...newPresets].sort((a, b) => a - b);
     setPresets(sorted);
     await AsyncStorage.setItem(PRESETS_KEY, JSON.stringify(sorted));
     
-    // Reseta o índice ativo se ele sair do range
     if (activePresetIndex >= sorted.length) {
       setActivePresetIndex(0);
     }
@@ -133,9 +129,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const selectPreset = (index: number) => {
-    // Lógica de bloqueio pode ser removida aqui se você quiser liberar a configuração pra todos,
-    // ou mantida se quiser que Free só use o primeiro da lista personalizada.
-    // Por enquanto, mantive a lógica:
     if (!isPro && index !== 0) return; 
     setActivePresetIndex(index);
   };
@@ -152,7 +145,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       activePresetIndex, 
       presets, 
       selectPreset,
-      updatePresets, // Exportando a função
+      updatePresets,
       isPro
     }}>
       {children}

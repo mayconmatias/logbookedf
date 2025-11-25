@@ -6,11 +6,12 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView,
   Alert,
   Dimensions,
   ScrollView,
 } from 'react-native';
+// [CORREÇÃO] Import correto da SafeAreaView
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
@@ -140,7 +141,7 @@ export default function WorkoutShareModal({
 
     return (
       <View style={styles.contentWrapper}>
-        {/* ÁREA DE VISUALIZAÇÃO FIXA (ocupa a maior parte da tela) */}
+        {/* ÁREA DE VISUALIZAÇÃO FIXA */}
         <View style={styles.previewArea}>
           <ViewShot
             ref={viewShotRef}
@@ -157,7 +158,7 @@ export default function WorkoutShareModal({
           </ViewShot>
         </View>
 
-        {/* ÁREA DE CONTROLES FIXA (parte inferior) */}
+        {/* ÁREA DE CONTROLES FIXA */}
         <View style={styles.controlsArea}>
           <View style={styles.sliderRow}>
             <Text style={styles.sliderLabel}>Fundo:</Text>
@@ -253,6 +254,7 @@ export default function WorkoutShareModal({
       animationType="fade"
       onRequestClose={onClose}
     >
+      {/* [CORREÇÃO] Usando SafeAreaView da lib correta e aplicando estilo de flex:1 e cor transparente */}
       <SafeAreaView style={styles.modalContainer}>
         {renderContent()}
       </SafeAreaView>

@@ -1,7 +1,6 @@
-// src/components/SetShareCard.tsx
 import React from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
-import { Trophy } from 'lucide-react-native';
+import { Feather } from '@expo/vector-icons'; // [MIGRAÇÃO] Usando Feather nativo
 import { LinearGradient } from 'expo-linear-gradient';
 import { HistoricalSet } from '@/types/workout';
 import { calculateE1RM } from '@/utils/e1rm';
@@ -14,7 +13,7 @@ interface Props {
   previousSet: HistoricalSet | null;
   isPR: boolean;
   getDaysAgo: (date: string | Date) => string;
-  bgOpacity: number; // AGORA só controla o fundo
+  bgOpacity: number;
   prKind?: 'e1rm' | 'reps' | 'none';
 }
 
@@ -71,7 +70,6 @@ export default function SetShareCard({
 
   return (
     <View style={styles.wrapper}>
-      {/* FUNDO COM OPACIDADE */}
       <View style={{ opacity: bgOpacity, ...StyleSheet.absoluteFillObject }}>
         <LinearGradient
           colors={['#232526', '#414345']}
@@ -79,11 +77,11 @@ export default function SetShareCard({
         />
       </View>
 
-      {/* CONTEÚDO 100% OPACO */}
       <View style={{ opacity: 1 }}>
         <View style={styles.headerRow}>
           <View style={styles.header}>
-            {isPR && <Trophy size={20} color="#F6E05E" style={{ marginRight: 10 }} />}
+            {/* [MIGRAÇÃO] Ícone trocado para Feather */}
+            {isPR && <Feather name="award" size={24} color="#F6E05E" style={{ marginRight: 10 }} />}
             <View>
               <Text style={styles.title}>
                 {isPR ? 'NOVO RECORDE!' : 'SÉRIE CONCLUÍDA'}
@@ -101,7 +99,6 @@ export default function SetShareCard({
           <Text style={styles.exerciseName}>{exerciseName}</Text>
         </View>
 
-        {/* Comparação */}
         <View style={styles.compareBox}>
           {previousSet ? (
             <>
@@ -122,7 +119,6 @@ export default function SetShareCard({
           )}
         </View>
 
-        {/* Badges */}
         {isPR && (
           <View style={styles.diffContainer}>
             <DiffBadge diff={weightDiff} unit="kg" isPositive={weightDiff > 0} />
@@ -141,32 +137,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'hidden',
   },
-  background: {
-    flex: 1,
-  },
-  headerRow: {
-    marginBottom: 16,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  title: {
-    color: '#F6E05E',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  prType: {
-    color: '#CBD5E0',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  exerciseName: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 6,
-  },
+  background: { flex: 1 },
+  headerRow: { marginBottom: 16 },
+  header: { flexDirection: 'row', alignItems: 'center' },
+  title: { color: '#F6E05E', fontSize: 18, fontWeight: 'bold' },
+  prType: { color: '#CBD5E0', fontSize: 12, marginTop: 2 },
+  exerciseName: { color: '#FFF', fontSize: 20, fontWeight: 'bold', marginTop: 6 },
   compareBox: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.08)',
@@ -180,43 +156,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     marginHorizontal: 12,
   },
-  dataRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  column: {
-    flex: 1,
-  },
-  columnLabel: {
-    color: '#A0AEC0',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  dateLabel: {
-    color: '#718096',
-    fontSize: 11,
-    marginBottom: 8,
-  },
-  dataValue: {
-    color: '#FFF',
-    fontSize: 32,
-    fontWeight: 'bold',
-  },
-  dataUnit: {
-    color: '#FFF',
-    fontSize: 16,
-    marginLeft: 4,
-  },
-  repText: {
-    color: '#FFF',
-    fontSize: 16,
-    marginTop: 4,
-  },
-  e1rmText: {
-    color: '#A0AEC0',
-    fontSize: 14,
-    marginTop: 4,
-  },
+  dataRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  column: { flex: 1 },
+  columnLabel: { color: '#A0AEC0', fontSize: 12, fontWeight: '600' },
+  dateLabel: { color: '#718096', fontSize: 11, marginBottom: 8 },
+  dataValue: { color: '#FFF', fontSize: 32, fontWeight: 'bold' },
+  dataUnit: { color: '#FFF', fontSize: 16, marginLeft: 4 },
+  repText: { color: '#FFF', fontSize: 16, marginTop: 4 },
+  e1rmText: { color: '#A0AEC0', fontSize: 14, marginTop: 4 },
   diffContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -228,8 +175,5 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 16,
   },
-  diffText: {
-    color: '#FFF',
-    fontWeight: 'bold',
-  },
+  diffText: { color: '#FFF', fontWeight: 'bold' },
 });

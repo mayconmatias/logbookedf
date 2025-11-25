@@ -1,8 +1,19 @@
-// Metro em JS puro para evitar TS em configs
-const { getDefaultConfig } = require("expo/metro-config");
-const path = __dirname;
+// metro.config.js
+const { getDefaultConfig } = require('expo/metro-config');
 
-module.exports = (async () => {
-  const config = await getDefaultConfig(path);
-  return config;
-})();
+const config = getDefaultConfig(__dirname);
+
+const { transformer, resolver } = config;
+
+config.transformer = {
+  ...transformer,
+  babelTransformerPath: require.resolve('react-native-svg-transformer'),
+};
+
+config.resolver = {
+  ...resolver,
+  assetExts: resolver.assetExts.filter((ext) => ext !== 'svg'),
+  sourceExts: [...resolver.sourceExts, 'svg', 'cjs'], // Adicionado 'cjs' para compatibilidade com algumas libs
+};
+
+module.exports = config;

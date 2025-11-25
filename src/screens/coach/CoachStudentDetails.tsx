@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
-import { BottomSheetModalProvider } from '@gorhom/bottom-sheet'; // [IMPORTANTE]
 
 import { RootStackParamList } from '@/types/navigation';
 import { Program } from '@/types/coaching';
@@ -21,7 +20,6 @@ import { WorkoutHistoryItem } from '@/types/workout';
 import { fetchStudentPrograms, createProgram } from '@/services/program.service';
 import { fetchStudentHistory, fetchStudentUniqueExercises } from '@/services/coaching.service';
 
-// Componente de Analytics
 import { 
   ExerciseAnalyticsSheet, 
   ExerciseAnalyticsSheetRef 
@@ -29,15 +27,26 @@ import {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CoachStudentDetails'>;
 
-function CoachStudentDetailsScreen({ navigation, route }: Props) {
+// Função auxiliar para calcular a cor do status
+const getStatusColor = (lastDate: string | null | undefined) => {
+  if (!lastDate) return '#CBD5E0'; 
+  
+  const today = new Date();
+  const last = new Date(lastDate);
+  const diffTime = Math.abs(today.getTime() - last.getTime());
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+  if (diffDays <= 3) return '#38A169'; 
+  if (diffDays <= 7) return '#ECC94B'; 
+  return '#E53E3E'; 
+};
+
+export default function CoachStudentDetailsScreen({ navigation, route }: Props) {
   const { relationship } = route.params;
   const studentName = relationship.student?.display_name || 'Aluno';
   const studentId = relationship.student_id;
 
-  // Controle das Abas
   const [activeTab, setActiveTab] = useState<'programs' | 'history'>('programs');
-
-  // Dados
   const [programs, setPrograms] = useState<Program[]>([]);
   const [history, setHistory] = useState<WorkoutHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,7 +91,8 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Criar',
-          onPress: async (name) => {
+          // [FIX TS] Tipagem explícita
+          onPress: async (name?: string) => {
             if (!name) return;
             try {
               setLoading(true);
@@ -100,7 +110,6 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
     );
   };
 
-  // --- LÓGICA DE ANALYTICS ---
   const handleOpenAnalyticsPicker = async () => {
     setIsAnalyticsPickerVisible(true);
     setLoadingExercises(true);
@@ -117,18 +126,16 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
 
   const handleSelectExerciseForAnalytics = (defId: string, name: string) => {
     setIsAnalyticsPickerVisible(false);
-    // Abre o Sheet passando o ID do Aluno para carregar os dados dele
+    // Pequeno delay para garantir que o modal anterior feche antes de abrir o Sheet nativo
     setTimeout(() => {
        analyticsSheetRef.current?.openSheet(defId, name, null, studentId);
-    }, 500); // Pequeno delay para o modal fechar suavemente
+    }, 300);
   };
 
-  // Filtro de busca no modal
   const filteredExercises = studentExercises.filter(ex => 
     ex.name.toLowerCase().includes(searchText.toLowerCase())
   );
 
-  // Renderers
   const renderProgramItem = ({ item }: { item: Program }) => (
     <TouchableOpacity
       style={[styles.card, item.is_active && styles.activeCard]}
@@ -174,7 +181,6 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       
-      {/* Header Actions */}
       <View style={styles.headerActions}>
         <TouchableOpacity style={styles.analyticsButton} onPress={handleOpenAnalyticsPicker}>
           <Feather name="bar-chart-2" size={20} color="#007AFF" />
@@ -182,7 +188,6 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* Tabs */}
       <View style={styles.tabsContainer}>
         <TouchableOpacity 
           style={[styles.tab, activeTab === 'programs' && styles.activeTab]}
@@ -205,7 +210,6 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       </View>
 
-      {/* Content */}
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} size="large" color="#007AFF" />
       ) : (
@@ -234,7 +238,6 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
         </>
       )}
 
-      {/* FAB */}
       {activeTab === 'programs' && (
         <TouchableOpacity style={styles.fab} onPress={handleCreateProgram}>
           <Feather name="plus" size={24} color="#FFF" />
@@ -242,7 +245,7 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
         </TouchableOpacity>
       )}
 
-      {/* --- MODAL DE SELEÇÃO DE EXERCÍCIO --- */}
+      {/* Modal Nativo para Picker */}
       <Modal
         visible={isAnalyticsPickerVisible}
         animationType="slide"
@@ -289,35 +292,22 @@ function CoachStudentDetailsScreen({ navigation, route }: Props) {
         </View>
       </Modal>
 
-      {/* ANALYTICS SHEET */}
       <ExerciseAnalyticsSheet ref={analyticsSheetRef} />
 
     </View>
   );
 }
 
-// Wrapper para BottomSheet
-export default function CoachStudentDetails(props: Props) {
-  return (
-    <BottomSheetModalProvider>
-      <CoachStudentDetailsScreen {...props} />
-    </BottomSheetModalProvider>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7FAFC', padding: 16 },
-  
   headerActions: { marginBottom: 16 },
   analyticsButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#EBF8FF', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: '#BEE3F8' },
   analyticsText: { marginLeft: 8, color: '#007AFF', fontWeight: '600', fontSize: 16 },
-
   tabsContainer: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 12, padding: 4, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0' },
   tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8, gap: 8 },
   activeTab: { backgroundColor: '#EBF8FF' },
   tabText: { fontSize: 14, fontWeight: '600', color: '#718096' },
   activeTabText: { color: '#007AFF' },
-
   card: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
   activeCard: { borderColor: '#007AFF', backgroundColor: '#F0F9FF' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
@@ -326,7 +316,6 @@ const styles = StyleSheet.create({
   badge: { backgroundColor: '#007AFF', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
   badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
   date: { fontSize: 12, color: '#718096' },
-  
   historyCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
   historyHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#EDF2F7', paddingBottom: 8 },
   historyTitle: { fontSize: 16, fontWeight: '700', color: '#2D3748' },
@@ -334,13 +323,9 @@ const styles = StyleSheet.create({
   historyBody: { marginTop: 4 },
   historyExercise: { fontSize: 14, color: '#4A5568', marginBottom: 2 },
   historyMore: { fontSize: 12, color: '#A0AEC0', fontStyle: 'italic', marginTop: 2 },
-
   emptyText: { textAlign: 'center', color: '#A0AEC0', marginTop: 40 },
-  
   fab: { position: 'absolute', bottom: 24, right: 24, backgroundColor: '#007AFF', flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5 },
   fabText: { color: '#FFF', fontWeight: 'bold', marginLeft: 8 },
-
-  // Modal Styles
   modalContainer: { flex: 1, backgroundColor: '#F7FAFC' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, alignItems: 'center', backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   modalTitle: { fontSize: 18, fontWeight: 'bold' },

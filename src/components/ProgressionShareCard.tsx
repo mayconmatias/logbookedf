@@ -1,7 +1,14 @@
 import React from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { VictoryChart, VictoryLine, VictoryArea, VictoryAxis, VictoryScatter, VictoryTheme } from 'victory-native';
+import { 
+  VictoryChart, 
+  VictoryLine, 
+  VictoryArea, 
+  VictoryAxis, 
+  VictoryScatter, 
+  VictoryTheme 
+} from 'victory-native';
 import { Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 
 import { ChartDataPoint } from '@/types/analytics';
@@ -35,7 +42,6 @@ export default function ProgressionShareCard({
 
   const hasProgression = progression && progression.length > 0;
 
-  // Estado "sem dados"
   if (!hasProgression) {
     const formattedTEV = `+${currentSessionTEV.toLocaleString('pt-BR')} kg`;
     return (
@@ -60,13 +66,11 @@ export default function ProgressionShareCard({
     );
   }
 
-  // Preparar dados para o Victory
   const nonNullProgression = progression!.filter(p => typeof p.value === 'number' && !Number.isNaN(p.value));
   const historicalValues = nonNullProgression.map(p => p.value);
   const lastHistoricalValue = historicalValues.length > 0 ? historicalValues[historicalValues.length - 1] : 0;
   const currentTotal = lastHistoricalValue + currentSessionTEV;
 
-  // Dados para o gráfico: Histórico + Ponto Atual
   const chartData = nonNullProgression.map((p, i) => ({ x: i + 1, y: p.value }));
   chartData.push({ x: chartData.length + 1, y: currentTotal });
 
@@ -75,16 +79,13 @@ export default function ProgressionShareCard({
 
   return (
     <View style={styles.wrapper}>
-      {/* Background */}
       <View style={{ opacity: bgOpacity, ...StyleSheet.absoluteFillObject }}>
         <LinearGradient colors={['#232526', '#414345']} style={styles.background} />
       </View>
 
       <View style={[styles.card, { height: cardHeight }]}>
         <Text style={styles.title}>Trabalho de Hoje</Text>
-
         <View style={styles.row}>
-          {/* Gráfico com Victory */}
           <View style={styles.chartContainer}>
             <VictoryChart 
               width={cardWidth * 0.6} 
@@ -98,33 +99,13 @@ export default function ProgressionShareCard({
                   <Stop offset="100%" stopColor="white" stopOpacity={0}/>
                 </SvgLinearGradient>
               </Defs>
-              
-              <VictoryAxis 
-                style={{ 
-                  axis: { stroke: "transparent" }, 
-                  tickLabels: { fill: "transparent" }, 
-                  grid: { stroke: "rgba(255,255,255,0.1)" } 
-                }} 
-              />
-              <VictoryArea
-                data={chartData}
-                interpolation="monotoneX"
-                style={{ data: { fill: "url(#chartGradient)" } }}
-              />
-              <VictoryLine
-                data={chartData}
-                interpolation="monotoneX"
-                style={{ data: { stroke: "white", strokeWidth: 2 } }}
-              />
-              <VictoryScatter
-                data={[chartData[chartData.length - 1]]}
-                size={5}
-                style={{ data: { fill: "#F56565" } }} // Ponto vermelho para hoje
-              />
+              <VictoryAxis style={{ axis: { stroke: "transparent" }, tickLabels: { fill: "transparent" }, grid: { stroke: "rgba(255,255,255,0.1)" } }} />
+              <VictoryArea data={chartData} interpolation="monotoneX" style={{ data: { fill: "url(#chartGradient)" } }} />
+              <VictoryLine data={chartData} interpolation="monotoneX" style={{ data: { stroke: "white", strokeWidth: 2 } }} />
+              <VictoryScatter data={[chartData[chartData.length - 1]]} size={5} style={{ data: { fill: "#F56565" } }} />
             </VictoryChart>
           </View>
 
-          {/* Informações */}
           <View style={styles.infoContainer}>
             <Text style={styles.exerciseName}>{exerciseName}</Text>
             <Text style={styles.series}>{`${set.weight} kg × ${set.reps}`}</Text>

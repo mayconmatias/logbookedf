@@ -1,4 +1,3 @@
-// src/screens/ExerciseCatalogScreen.tsx
 import React, {
   useState,
   useEffect,
@@ -21,41 +20,28 @@ import {
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/types/navigation';
-import {
-  Trophy,
-  Info,
-  ChevronDown,
-  ChevronUp,
-  MoreVertical,
-  Plus,
-} from 'lucide-react-native';
-// Serviços de WORKOUT
+// [MIGRAÇÃO] Apenas Feather
+import { Feather } from '@expo/vector-icons';
+
 import {
   getOrCreateTodayWorkoutId,
   fetchAndGroupWorkoutData,
 } from '@/services/workouts.service';
-// Serviços de EXERCÍCIO
 import {
   fetchExerciseSetHistory,
   getOrCreateExerciseInWorkout,
   saveSet,
   updateExerciseInstructions,
-  // Certifique-se que estas funções estão exportadas no seu exercises.service.ts
-  // renameExercise, 
-  // mergeExercises,
-  // deleteExerciseHistory 
 } from '@/services/exercises.service';
 import { CatalogExerciseItem, ExerciseSetHistoryItem } from '@/types/catalog';
 import {
   ExerciseAnalyticsSheet,
   ExerciseAnalyticsSheetRef,
 } from '@/components/ExerciseAnalyticsSheet';
-import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import t from '@/i18n/pt';
 import { useExerciseCatalog } from '@/hooks/useExerciseCatalog';
 import { WorkoutExercise } from '@/types/workout';
 
-// --- Componente QuickAddForm ---
 interface QuickAddFormProps {
   definitionId: string;
   onSetAdded: () => void;
@@ -102,13 +88,17 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, onSetAdded })
         <TextInput style={[styles.input, styles.inputFlex]} placeholder="RPE" keyboardType="numeric" value={rpe} onChangeText={setRpe} />
       </View>
       <TouchableOpacity style={[styles.buttonPrimary, saving && styles.buttonDisabled]} onPress={handleQuickAdd} disabled={saving}>
-        {saving ? <ActivityIndicator color="#fff" /> : <><Plus size={16} color="#fff" /><Text style={styles.buttonTextPrimary}>Adicionar Série</Text></>}
+        {saving ? <ActivityIndicator color="#fff" /> : (
+          <>
+            <Feather name="plus" size={16} color="#fff" />
+            <Text style={styles.buttonTextPrimary}>Adicionar Série</Text>
+          </>
+        )}
       </TouchableOpacity>
     </View>
   );
 };
 
-// --- Componente ExerciseHistoryNinho ---
 interface ExerciseHistoryProps {
   definitionId: string;
   exerciseNameCapitalized: string;
@@ -134,11 +124,11 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
       <QuickAddForm definitionId={definitionId} onSetAdded={loadHistory} />
       <View style={styles.ninhoHeader}>
         <TouchableOpacity style={styles.ninhoButton} onPress={onShowAnalytics}>
-          <Info size={16} color="#007AFF" />
+          <Feather name="info" size={16} color="#007AFF" />
           <Text style={styles.ninhoButtonText}>Ver Informações</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.ninhoButton} onPress={onOpenMenu}>
-          <MoreVertical size={16} color="#555" />
+          <Feather name="more-vertical" size={16} color="#555" />
           <Text style={styles.ninhoButtonText}>Opções</Text>
         </TouchableOpacity>
       </View>
@@ -149,7 +139,8 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
               <Text style={styles.historyDate}>{new Date(item.workout_date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}</Text>
               <Text style={styles.historySet}>Série {item.set_number}</Text>
               <Text style={styles.historyDetails}>{item.weight}kg x {item.reps} reps</Text>
-              {item.is_pr && <Trophy size={14} color="#D69E2E" style={styles.prIcon} />}
+              {/* Ícone de PR (Award no Feather) */}
+              {item.is_pr && <Feather name="award" size={14} color="#D69E2E" style={styles.prIcon} />}
             </View>
           ))}
         </View>
@@ -158,10 +149,9 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
   );
 };
 
-// --- Tela Principal ---
 type CatalogScreenProps = NativeStackScreenProps<RootStackParamList, 'ExerciseCatalog'>;
 
-const ExerciseCatalogScreen: React.FC<CatalogScreenProps> = ({ navigation }) => {
+export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps) {
   const {
     loading, allExercises, filteredExercises, handleCreateExercise, handleRenameExercise,
     handleMergeExercises, handleDeleteExercise, searchTerm, setSearchTerm, loadCatalog
@@ -170,7 +160,6 @@ const ExerciseCatalogScreen: React.FC<CatalogScreenProps> = ({ navigation }) => 
   const [expandedExercise, setExpandedExercise] = useState<string | null>(null);
   const analyticsSheetRef = useRef<ExerciseAnalyticsSheetRef>(null);
 
-  // Estados do Modal de Instruções
   const [isInstructionModalVisible, setIsInstructionModalVisible] = useState(false);
   const [editingDefId, setEditingDefId] = useState<string | null>(null);
   const [editNotes, setEditNotes] = useState('');
@@ -180,7 +169,9 @@ const ExerciseCatalogScreen: React.FC<CatalogScreenProps> = ({ navigation }) => 
   const promptToCreateExercise = useCallback(async () => {
     Alert.prompt('Novo Exercício', 'Nome do exercício:', [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Salvar', onPress: async (name) => {
+      { 
+        text: 'Salvar', 
+        onPress: async (name?: string) => {
           if (!name) return;
           const newEx = await handleCreateExercise(name);
           if (newEx) setExpandedExercise(newEx.exercise_id);
@@ -192,7 +183,7 @@ const ExerciseCatalogScreen: React.FC<CatalogScreenProps> = ({ navigation }) => 
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity onPress={promptToCreateExercise} style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
-          <Plus size={28} color="#007AFF" />
+          <Feather name="plus" size={28} color="#007AFF" />
         </TouchableOpacity>
       ),
     });
@@ -223,7 +214,7 @@ const ExerciseCatalogScreen: React.FC<CatalogScreenProps> = ({ navigation }) => 
   const handleEditName = (definitionId: string, oldNameCapitalized: string) => {
     Alert.prompt('Editar Nome', `Novo nome para "${oldNameCapitalized}":`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Salvar', onPress: async (newName) => {
+      { text: 'Salvar', onPress: async (newName?: string) => {
           if (!newName || newName.trim() === '') return Alert.alert('Erro', 'Nome inválido');
           
           const existing = allExercises.find(ex => ex.exercise_name_lowercase === newName.trim().toLowerCase());
@@ -278,7 +269,7 @@ const ExerciseCatalogScreen: React.FC<CatalogScreenProps> = ({ navigation }) => 
             <View style={styles.cardContainer}>
               <TouchableOpacity style={styles.card} onPress={() => setExpandedExercise(prev => prev === item.exercise_id ? null : item.exercise_id)}>
                 <View style={styles.cardContent}><Text style={styles.cardTitle}>{item.exercise_name_capitalized}</Text></View>
-                {isExpanded ? <ChevronUp size={22} color="#4A5568" /> : <ChevronDown size={22} color="#4A5568" />}
+                <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color="#4A5568" />
               </TouchableOpacity>
               {isExpanded && (
                 <ExerciseHistoryNinho
@@ -316,13 +307,7 @@ const ExerciseCatalogScreen: React.FC<CatalogScreenProps> = ({ navigation }) => 
       <ExerciseAnalyticsSheet ref={analyticsSheetRef} />
     </View>
   );
-};
-
-export default (props: CatalogScreenProps) => (
-  <BottomSheetModalProvider>
-    <ExerciseCatalogScreen {...props} />
-  </BottomSheetModalProvider>
-);
+}
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },

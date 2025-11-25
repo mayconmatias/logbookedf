@@ -81,10 +81,11 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
     try {
       // 1. Selecionar Imagem
       const result = await ImagePicker.launchImageLibraryAsync({
+        // [CORREÇÃO] Voltamos para MediaTypeOptions para satisfazer o TypeScript
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        aspect: [1, 1], // Quadrado perfeito para avatar
-        quality: 0.5,   // Qualidade reduzida para economizar dados
+        aspect: [1, 1], 
+        quality: 0.5,   
       });
 
       if (result.canceled || !result.assets || result.assets.length === 0) {
@@ -303,7 +304,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 50,
   },
-  // Estilos do Avatar
   avatarContainer: {
     alignItems: 'center',
     marginBottom: 32,
@@ -347,7 +347,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  
   formGroup: {
     marginBottom: 24,
   },
