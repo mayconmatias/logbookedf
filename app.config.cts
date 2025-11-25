@@ -66,14 +66,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-font",
     "expo-asset",
     "expo-local-authentication",
-    "expo-router",
-    [
-      "expo-build-properties",
-      {
-        "ios": {
-          "useFrameworks": "static" // [IMPORTANTE] Para compatibilidade com libs nativas novas
-        }
-      }
-    ]
+    "expo-router"
+    
   ]
 });
