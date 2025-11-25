@@ -80,7 +80,7 @@ export default function MyPrograms({ navigation }: Props) {
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Criar',
-          onPress: async (name) => {
+          onPress: async (name?: string) => {
             if (!name) return;
             try {
               setLoading(true);

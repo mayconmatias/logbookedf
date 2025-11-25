@@ -1,26 +1,34 @@
 {
-  "expo": {
-    "name": "Logbook EDF",
-    "slug": "logbookedf",
-    "version": "1.0.2",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "automatic",
-    "ios": {
-      "bundleIdentifier": "com.mayconmatias.logbookedf"
+  "cli": {
+    "version": ">= 7.6.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
     },
-    "android": {
-      "package": "com.mayconmatias.logbookedf"
+    "preview": {
+      "distribution": "internal"
     },
-    "plugins": [
-      "expo-font",
-      "expo-asset",
-      "expo-local-authentication"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "c69323ab-c81d-444e-821a-4dad327e89f8"
+    "production": {
+      "distribution": "store",
+      "ios": {
+        "image": "latest",
+        "resourceClass": "large",
+        "cocoapods": "1.16.2",
+        "simulator": false,
+        "autoIncrement": true
+      },
+      "android": {
+        "buildType": "app-bundle"
       }
+    },
+    "internal": {
+      "distribution": "internal"
     }
+  },
+  "submit": {
+    "production": {}
   }
 }

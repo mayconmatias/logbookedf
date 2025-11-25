@@ -17,27 +17,25 @@ import { useTimer } from '@/context/TimerContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigate } from '@/utils/navigationRef';
 
-// Animações e Gestos
-import { PanGestureHandler, PanGestureHandlerGestureEvent } from 'react-native-gesture-handler';
+// [MODERNIZADO] Usando Gesture Detector (RN 0.81 Friendly)
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { 
   useSharedValue, 
   useAnimatedStyle, 
-  useAnimatedGestureHandler, 
   withSpring, 
   withDelay,
   withTiming,
   interpolate,
+  runOnJS
 } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
 
-// Configurações Visuais
 const FAB_SIZE = 60;
 const SATELLITE_SIZE = 44;
 const RADIUS = 110; 
 const MARGIN = 20;
 
-// Componente Satélite (Botão do Menu)
 const SatelliteButton = ({ 
   index, 
   totalItems, 
@@ -107,20 +105,24 @@ export default function RestTimer() {
 
   const insets = useSafeAreaInsets();
 
-  // --- LÓGICA DE DRAG & DROP ---
+  // --- GESTURE LOGIC (Gesture API) ---
   const x = useSharedValue(MARGIN);
   const y = useSharedValue(height - insets.bottom - 150);
+  
+  const contextX = useSharedValue(0);
+  const contextY = useSharedValue(0);
 
-  const gestureHandler = useAnimatedGestureHandler<PanGestureHandlerGestureEvent, { x: number; y: number }>({
-    onStart: (_, ctx) => {
-      ctx.x = x.value;
-      ctx.y = y.value;
-    },
-    onActive: (event, ctx) => {
-      x.value = ctx.x + event.translationX;
-      y.value = ctx.y + event.translationY;
-    },
-    onEnd: () => {
+  const panGesture = Gesture.Pan()
+    .enabled(!isAddingMode)
+    .onStart(() => {
+      contextX.value = x.value;
+      contextY.value = y.value;
+    })
+    .onUpdate((event) => {
+      x.value = contextX.value + event.translationX;
+      y.value = contextY.value + event.translationY;
+    })
+    .onEnd(() => {
       const minX = MARGIN;
       const maxX = width - FAB_SIZE - MARGIN;
       const minY = insets.top + MARGIN;
@@ -131,14 +133,12 @@ export default function RestTimer() {
 
       if (y.value < minY) y.value = withSpring(minY);
       else if (y.value > maxY) y.value = withSpring(maxY);
-    },
-  });
+    });
 
   const fabStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: x.value }, { translateY: y.value }],
   }));
 
-  // --- FORMAT ---
   const formatTime = (secs: number) => {
     const absSecs = Math.abs(secs);
     const m = Math.floor(absSecs / 60);
@@ -149,16 +149,13 @@ export default function RestTimer() {
   const formatLabel = (totalSeconds: number) => {
     const m = Math.floor(totalSeconds / 60);
     const s = totalSeconds % 60;
-
     if (m > 0 && s > 0) return `${m}'${s}"`;
     if (m > 0) return `${m}'`;
     return `${s}"`;
   };
 
-  // --- HANDLERS ---
   const handleMainTap = () => {
     if (isAddingMode) return;
-    
     if (isActive || isOvertime) {
       setIsMenuOpen(!isMenuOpen);
     } else {
@@ -181,12 +178,10 @@ export default function RestTimer() {
        Alert.alert('Funcionalidade PRO', 'Apenas usuários PRO podem editar os tempos.');
        return;
     }
-
     if (presets.length <= 1) {
       Alert.alert('Erro', 'Você precisa ter pelo menos um tempo configurado.');
       return;
     }
-
     Alert.alert('Remover Tempo', `Deseja remover este preset?`, [
       { text: 'Cancelar', style: 'cancel' },
       { 
@@ -218,20 +213,15 @@ export default function RestTimer() {
     const m = parseInt(newMin || '0', 10);
     const s = parseInt(newSec || '0', 10);
     const total = (m * 60) + s;
-
     if (total <= 0) {
       Alert.alert('Erro', 'O tempo deve ser maior que zero.');
       return;
     }
-
     const newPresets = [...presets, total];
     const uniqueSorted = Array.from(new Set(newPresets)).sort((a, b) => a - b);
-    
     await updatePresets(uniqueSorted);
-    
     const newIndex = uniqueSorted.indexOf(total);
     if (newIndex !== -1) selectPreset(newIndex);
-
     handleCancelAdd();
   };
 
@@ -242,10 +232,8 @@ export default function RestTimer() {
     Keyboard.dismiss();
   };
 
-  // --- ITENS DO MENU RADIAL ---
   const menuItems = [];
 
-  // 1. Botão STOP
   if (isActive || isOvertime) {
     menuItems.push({
       key: 'stop',
@@ -257,11 +245,10 @@ export default function RestTimer() {
       onPress: handleStop,
       isStop: true,
       isSelected: false,
-      onLongPress: undefined // [CORREÇÃO] Define explicitamente como undefined
+      onLongPress: undefined 
     });
   }
 
-  // 2. Presets (Dinâmicos)
   presets.forEach((secs, idx) => {
     const isLocked = !isPro && idx !== 0;
     const isSelected = activePresetIndex === idx;
@@ -282,7 +269,6 @@ export default function RestTimer() {
     });
   });
 
-  // 3. Botão ADICIONAR
   menuItems.push({
     key: 'add-btn',
     component: (
@@ -295,10 +281,9 @@ export default function RestTimer() {
     isSelected: false,
     isStop: false,
     isAdd: true,
-    onLongPress: undefined // [CORREÇÃO] Define explicitamente como undefined
+    onLongPress: undefined 
   });
 
-  // --- ALERTA OVERTIME (TELA CHEIA) ---
   if (isOvertime && !isMenuOpen && !isAddingMode) {
      return (
       <View style={[styles.alertOverlay, { paddingBottom: insets.bottom + 20 }]}>
@@ -327,10 +312,9 @@ export default function RestTimer() {
         </TouchableWithoutFeedback>
       )}
 
-      <PanGestureHandler onGestureEvent={gestureHandler} enabled={!isAddingMode}>
+      <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.fabContainer, fabStyle]}>
           
-          {/* Form Adicionar */}
           {isAddingMode && (
             <View style={styles.addFormContainer}>
                <Text style={styles.addFormTitle}>Novo Tempo</Text>
@@ -366,7 +350,6 @@ export default function RestTimer() {
             </View>
           )}
 
-          {/* Menu Radial */}
           {!isAddingMode && (
              <View style={styles.satellitesLayer}>
               {menuItems.map((item, idx) => (
@@ -391,7 +374,6 @@ export default function RestTimer() {
             </View>
           )}
 
-          {/* FAB */}
           <TouchableOpacity 
             style={[
               styles.fab, 
@@ -416,89 +398,39 @@ export default function RestTimer() {
           </TouchableOpacity>
 
         </Animated.View>
-      </PanGestureHandler>
+      </GestureDetector>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 998,
-    backgroundColor: 'rgba(0,0,0,0.3)'
-  },
-  fabContainer: {
-    position: 'absolute',
-    top: 0, left: 0,
-    width: FAB_SIZE,
-    height: FAB_SIZE,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  fab: {
-    width: FAB_SIZE,
-    height: FAB_SIZE,
-    borderRadius: FAB_SIZE / 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
-    borderWidth: 2,
-    borderColor: '#FFF',
-    zIndex: 1001,
-    backgroundColor: '#718096'
-  },
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 998, backgroundColor: 'rgba(0,0,0,0.3)' },
+  fabContainer: { position: 'absolute', top: 0, left: 0, width: FAB_SIZE, height: FAB_SIZE, justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  fab: { width: FAB_SIZE, height: FAB_SIZE, borderRadius: FAB_SIZE / 2, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65, elevation: 8, borderWidth: 2, borderColor: '#FFF', zIndex: 1001, backgroundColor: '#718096' },
   fabIdle: { backgroundColor: '#718096' },
   fabActive: { backgroundColor: '#007AFF', borderColor: '#1A202C' },
   fabOvertime: { backgroundColor: '#E53E3E', borderColor: '#FFF' },
   fabHidden: { opacity: 0 },
-  
   fabTimerText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
-
   satellitesLayer: { position: 'absolute', zIndex: 999 },
   satelliteContainer: { position: 'absolute', width: SATELLITE_SIZE, height: SATELLITE_SIZE, justifyContent: 'center', alignItems: 'center' },
-  satelliteBtnBase: {
-    width: SATELLITE_SIZE, height: SATELLITE_SIZE, borderRadius: SATELLITE_SIZE / 2,
-    justifyContent: 'center', alignItems: 'center',
-    shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 5,
-  },
+  satelliteBtnBase: { width: SATELLITE_SIZE, height: SATELLITE_SIZE, borderRadius: SATELLITE_SIZE / 2, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 5 },
   satelliteNormal: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E2E8F0' },
   satelliteSelected: { backgroundColor: '#007AFF', borderWidth: 1, borderColor: '#0056b3' },
   satelliteStop: { backgroundColor: '#FFF', borderWidth: 2, borderColor: '#E53E3E' },
   satelliteAdd: { backgroundColor: '#F0F9FF', borderColor: '#BEE3F8' },
-  
   satelliteText: { fontSize: 11, fontWeight: '600', color: '#4A5568' }, 
   stopIconWrapper: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
   stopSquare: { width: 14, height: 14, borderRadius: 2, backgroundColor: '#E53E3E' },
   lockIcon: { position: 'absolute', top: -3, right: -3, backgroundColor: '#2D3748', borderRadius: 5, padding: 1 },
-
-  addFormContainer: {
-    position: 'absolute',
-    bottom: 0, 
-    left: 0,
-    backgroundColor: '#FFF',
-    borderRadius: 20,
-    padding: 16,
-    width: 180,
-    alignItems: 'center',
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10,
-    zIndex: 1002
-  },
+  addFormContainer: { position: 'absolute', bottom: 0, left: 0, backgroundColor: '#FFF', borderRadius: 20, padding: 16, width: 180, alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10, zIndex: 1002 },
   addFormTitle: { fontSize: 12, fontWeight: 'bold', color: '#718096', marginBottom: 8, textTransform: 'uppercase' },
   inputsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  timeInput: { 
-    width: 40, height: 40, borderRadius: 8, backgroundColor: '#F7FAFC', borderWidth: 1, borderColor: '#E2E8F0',
-    textAlign: 'center', fontSize: 16, fontWeight: 'bold', color: '#2D3748'
-  },
+  timeInput: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#F7FAFC', borderWidth: 1, borderColor: '#E2E8F0', textAlign: 'center', fontSize: 16, fontWeight: 'bold', color: '#2D3748' },
   timeSep: { fontSize: 14, color: '#A0AEC0', marginHorizontal: 4 },
   formActions: { flexDirection: 'row', gap: 12 },
   formBtnCancel: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF5F5', justifyContent: 'center', alignItems: 'center' },
   formBtnConfirm: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#38A169', justifyContent: 'center', alignItems: 'center' },
-
   alertOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-end', zIndex: 9999, paddingHorizontal: 20 },
   alertCard: { width: '100%', backgroundColor: '#D97706', borderRadius: 20, padding: 24, alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10, marginBottom: 20 },
   alertHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },

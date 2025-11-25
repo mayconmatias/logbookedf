@@ -7,8 +7,8 @@ import {
   StyleSheet,
   Switch,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
-import AutocompleteInput from 'react-native-autocomplete-input';
 import { Feather } from '@expo/vector-icons';
 import { PerformanceSet } from '@/types/workout';
 import { LBS_TO_KG_FACTOR } from '@/utils/e1rm';
@@ -83,6 +83,7 @@ const WorkoutForm = memo(
     onShowCoachInstructions,
     onClear,
   }: WorkoutFormProps) => {
+    
     const filteredExercises = useMemo(() => {
       if (exerciseName === '' || !isAutocompleteFocused || isTemplateMode)
         return [];
@@ -134,33 +135,38 @@ const WorkoutForm = memo(
 
         <View style={styles.inputWithIconsRow}>
            <View style={{ flex: 1, marginRight: 8, zIndex: 99 }}>
-             <AutocompleteInput
-              selectTextOnFocus={true} 
-              style={[styles.input, (isTemplateMode || isEditing) && styles.inputDisabled]}
-              placeholder="Ex.: Agachamento"
-              value={exerciseName}
-              data={filteredExercises}
-              onChangeText={setExerciseName}
-              onFocus={() => setIsAutocompleteFocused(true)}
-              onBlur={() => setIsAutocompleteFocused(false)}
-              editable={!isTemplateMode && !isEditing}
-              returnKeyType="done"
-              blurOnSubmit={true}
-              flatListProps={{
-                nestedScrollEnabled: true,
-                keyboardShouldPersistTaps: 'always',
-                keyExtractor: (item: string) => item,
-                renderItem: ({ item }: { item: string }) => (
-                  <TouchableOpacity onPress={() => handleSelectExercise(item)}>
-                    <Text style={styles.listItem}>{item}</Text>
-                  </TouchableOpacity>
-                ),
-                style: styles.listContainer,
-              }}
-              hideResults={!isAutocompleteFocused || filteredExercises.length === 0}
-              inputContainerStyle={{ borderWidth: 0 }} 
-              listContainerStyle={{ zIndex: 999 }}
-            />
+             
+             <TextInput
+                style={[styles.input, (isTemplateMode || isEditing) && styles.inputDisabled]}
+                placeholder="Ex.: Agachamento"
+                value={exerciseName}
+                onChangeText={setExerciseName}
+                onFocus={() => setIsAutocompleteFocused(true)}
+                onBlur={() => {
+                  // Pequeno delay para permitir o clique na lista antes de fechar
+                  setTimeout(() => setIsAutocompleteFocused(false), 200);
+                }}
+                editable={!isTemplateMode && !isEditing}
+                returnKeyType="done"
+                blurOnSubmit={true}
+             />
+
+             {/* Lista de Sugestões Manual (Substitui a lib externa) */}
+             {isAutocompleteFocused && filteredExercises.length > 0 && (
+               <View style={styles.listContainer}>
+                 <FlatList
+                   data={filteredExercises}
+                   keyboardShouldPersistTaps="handled"
+                   keyExtractor={(item) => item}
+                   renderItem={({ item }) => (
+                     <TouchableOpacity onPress={() => handleSelectExercise(item)} style={styles.listItemContainer}>
+                       <Text style={styles.listItem}>{item}</Text>
+                     </TouchableOpacity>
+                   )}
+                   style={{ maxHeight: 150 }}
+                 />
+               </View>
+             )}
 
             {exerciseName.length > 0 && !isTemplateMode && !isEditing && (
               <TouchableOpacity 
@@ -298,10 +304,7 @@ const WorkoutForm = memo(
           onChangeText={setObservations}
         />
 
-        {/* CONTÊINER DOS BOTÕES REORGANIZADOS */}
         <View style={styles.buttonRowContainer}>
-          
-          {/* 1. Botão ESQUERDA (Principal: Salvar + Timer) */}
           <TouchableOpacity
             style={[styles.buttonPrimary, { flex: 1 }]}
             onPress={onSaveAndRest}
@@ -319,7 +322,6 @@ const WorkoutForm = memo(
              )}
           </TouchableOpacity>
 
-          {/* 2. Botão DIREITA (Secundário: Só Salvar) */}
           <TouchableOpacity
             style={[styles.buttonSecondary, { width: 100 }]}
             onPress={handleSaveSet}
@@ -329,7 +331,6 @@ const WorkoutForm = memo(
                {isEditing ? 'Só Atualizar' : 'Só Salvar'}
             </Text>
           </TouchableOpacity>
-
         </View>
       </View>
     );
@@ -373,10 +374,10 @@ const styles = StyleSheet.create({
   
   listContainer: { 
     position: 'absolute', 
-    top: 42, 
+    top: 50, 
     left: 0, 
     right: 0, 
-    maxHeight: 220, 
+    maxHeight: 150, 
     backgroundColor: '#fff', 
     borderWidth: 1, 
     borderColor: '#ccc', 
@@ -388,7 +389,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
   },
-  listItem: { padding: 14, fontSize: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  listItemContainer: {
+    borderBottomWidth: 1, 
+    borderBottomColor: '#f0f0f0',
+  },
+  listItem: { padding: 14, fontSize: 16 },
   
   clearButton: { position: 'absolute', right: 10, top: 12, padding: 4, zIndex: 300 },
   hintText: { fontSize: 14, color: '#555', fontStyle: 'italic' },
@@ -403,7 +408,6 @@ const styles = StyleSheet.create({
   sideButtonText: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
   sideButtonTextSelected: { color: '#fff' },
   
-  // Botões
   buttonRowContainer: {
     flexDirection: 'row',
     gap: 10,

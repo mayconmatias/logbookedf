@@ -1,5 +1,4 @@
-// src/hooks/useWorkoutSession.ts
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   getOrCreateTodayWorkoutId,
   fetchAndGroupWorkoutData,
@@ -8,56 +7,48 @@ import {
 import { WorkoutExercise } from '@/types/workout';
 import { Alert } from 'react-native';
 
-/**
- * Hook responsável por gerenciar a vida da sessão (abrir, carregar, finalizar).
- * Agora suporta diferenciar entre Treino Livre e Templates.
- */
 export const useWorkoutSession = (
   paramWorkoutId?: string,
-  paramTemplateId?: string // <--- Recebe o Template ID
+  paramTemplateId?: string 
 ) => {
   const [sessionWorkoutId, setSessionWorkoutId] = useState<string | null>(null);
   const [groupedWorkout, setGroupedWorkout] = useState<WorkoutExercise[]>([]);
   const [loading, setLoading] = useState(true);
-  const isMounted = useRef(true);
 
-  const initializeSession = useCallback(async () => {
+  const initializeSession = useCallback(async (signal: AbortSignal) => {
     setLoading(true);
     try {
       let data: WorkoutExercise[] = [];
       let workoutId: string | null = null;
 
       if (paramWorkoutId) {
-        // MODO HISTÓRICO/EDIÇÃO: Abre um treino específico passado por parâmetro
         workoutId = paramWorkoutId;
         data = await fetchAndGroupWorkoutData(workoutId);
       } else {
-        // MODO SESSÃO DO DIA:
-        // Busca ou cria baseado no Template (ou falta dele)
         workoutId = await getOrCreateTodayWorkoutId(paramTemplateId);
         data = await fetchAndGroupWorkoutData(workoutId);
       }
 
-      if (isMounted.current) {
+      if (!signal.aborted) {
         setGroupedWorkout(data);
         setSessionWorkoutId(workoutId);
       }
     } catch (e: any) {
-      if (isMounted.current) {
+      if (!signal.aborted) {
         Alert.alert('Erro ao carregar sessão', e.message);
       }
     } finally {
-      if (isMounted.current) {
+      if (!signal.aborted) {
         setLoading(false);
       }
     }
-  }, [paramWorkoutId, paramTemplateId]); // Reage se o template mudar
+  }, [paramWorkoutId, paramTemplateId]);
 
   useEffect(() => {
-    isMounted.current = true;
-    initializeSession();
+    const controller = new AbortController();
+    initializeSession(controller.signal);
     return () => {
-      isMounted.current = false;
+      controller.abort();
     };
   }, [initializeSession]);
 
@@ -65,7 +56,6 @@ export const useWorkoutSession = (
     if (!sessionWorkoutId) return;
     const hasSavedSets = groupedWorkout.some((ex) => ex.sets.length > 0);
     
-    // Se não estamos editando um histórico antigo, finaliza a sessão
     if (!paramWorkoutId) {
       await finishWorkoutSession(sessionWorkoutId, hasSavedSets);
     }

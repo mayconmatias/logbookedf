@@ -10,7 +10,7 @@ module.exports = function (api) {
           alias: { '@': './src' },
         },
       ],
-      ['react-native-reanimated/plugin'], // <-- A sintaxe correta
+      'react-native-reanimated/plugin',
     ],
   };
 };

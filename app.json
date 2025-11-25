@@ -7,15 +7,23 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "bundleIdentifier": "com.mayconmatias.logbookedf"
+      "bundleIdentifier": "com.mayconmatias.logbookedf",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "com.mayconmatias.logbookedf"
+      "package": "com.mayconmatias.logbookedf",
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
     },
     "plugins": [
       "expo-font",
       "expo-asset",
-      "expo-local-authentication"
+      "expo-local-authentication",
+      "expo-router"
     ],
     "extra": {
       "eas": {
