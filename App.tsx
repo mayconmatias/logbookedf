@@ -20,7 +20,6 @@ import { Feather } from '@expo/vector-icons';
 import { supabase } from "@/lib/supabaseClient";
 import type { RootStackParamList } from "@/types/navigation";
 
-// [CORREÇÃO] Importante para o Timer navegar
 import { navigationRef } from "@/utils/navigationRef";
 
 import LoginCPF from "@/screens/LoginCPF";
@@ -89,19 +88,38 @@ export default function App() {
     })();
   }, []);
 
+  // [CORREÇÃO] Tratamento robusto de sessão
   useEffect(() => {
     let mounted = true;
 
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!mounted) return;
-      setSession(session);
-      setLoading(false);
-    })();
+    const initializeSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        if (mounted) {
+          setSession(data.session);
+        }
+      } catch (e: any) {
+        console.log("Sessão inválida ou expirada:", e.message);
+        await supabase.auth.signOut();
+        if (mounted) {
+          setSession(null);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    initializeSession();
 
     const { data: sub } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         if (!mounted) return;
+        
+        // Se o evento for SIGNED_OUT, a sessão já vem nula, então isso cobre revogação
         setSession(session);
         
         if (event === 'PASSWORD_RECOVERY') {
@@ -133,7 +151,6 @@ export default function App() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <TimerProvider>
           <BiometricGate sessionActive={!!session}>
-            {/* [CORREÇÃO] navigationRef injetada aqui */}
             <NavigationContainer linking={linking} ref={navigationRef}>
               {session ? (
                  isPasswordRecovery ? (

@@ -17,7 +17,7 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Keyboard 
+  Keyboard // [Importante para UX]
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/types/navigation';
@@ -42,7 +42,7 @@ import t from '@/i18n/pt';
 import { useExerciseCatalog } from '@/hooks/useExerciseCatalog';
 import { WorkoutExercise } from '@/types/workout';
 
-// [NOVO] Helper para formatação
+// Formatador de data simples
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
   return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear().toString().slice(2)}`;
@@ -50,19 +50,31 @@ const formatDate = (dateString: string) => {
 
 interface QuickAddFormProps {
   definitionId: string;
+  lastSet?: ExerciseSetHistoryItem; // [NOVO] Recebe a última série para preencher
   onSetAdded: () => void;
 }
 
-const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, onSetAdded }) => {
+const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSetAdded }) => {
   const [weight, setWeight] = useState('');
   const [reps, setReps] = useState('');
   const [rpe, setRpe] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // [UX] Pré-preenche os campos quando o histórico carregar
+  useEffect(() => {
+    if (lastSet) {
+      setWeight(lastSet.weight.toString());
+      setReps(lastSet.reps.toString());
+      // RPE geralmente não salvamos no histórico simplificado, mas se tivesse, iria aqui
+    }
+  }, [lastSet]);
+
   const handleQuickAdd = async () => {
     if (!weight || !reps) return Alert.alert(t.common.attention, 'Peso e Reps são obrigatórios.');
+    
     setSaving(true);
-    Keyboard.dismiss();
+    Keyboard.dismiss(); // Baixa o teclado
+
     try {
       const todayWorkoutId = await getOrCreateTodayWorkoutId();
       const exerciseInstanceId = await getOrCreateExerciseInWorkout(todayWorkoutId, definitionId);
@@ -78,8 +90,12 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, onSetAdded })
         reps: parseInt(reps, 10),
         rpe: rpe ? parseFloat(rpe) : undefined,
       });
-      setWeight(''); setReps(''); setRpe('');
+
+      // Não limpamos os campos, mantemos a carga anterior para facilitar séries seguidas (Pirâmide)
+      // Apenas damos feedback visual
+      Alert.alert('Sucesso', 'Série adicionada ao treino de hoje!'); 
       onSetAdded();
+      
     } catch (e: any) {
       Alert.alert(t.common.error, e.message);
     } finally {
@@ -89,16 +105,51 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, onSetAdded })
 
   return (
     <View style={styles.quickAddForm}>
+      <Text style={styles.sectionLabel}>Adicionar Série ao Treino de Hoje:</Text>
+      
       <View style={styles.inputRow}>
-        <TextInput style={[styles.input, styles.inputFlex]} placeholder="Peso (kg)" keyboardType="numeric" value={weight} onChangeText={setWeight} />
-        <TextInput style={[styles.input, styles.inputFlex]} placeholder="Reps" keyboardType="numeric" value={reps} onChangeText={setReps} />
-        <TextInput style={[styles.input, styles.inputFlex]} placeholder="RPE" keyboardType="numeric" value={rpe} onChangeText={setRpe} />
+        <View style={styles.inputWrapper}>
+          <Text style={styles.inputLabel}>Carga (kg)</Text>
+          <TextInput 
+            style={styles.input} 
+            placeholder="0" 
+            keyboardType="numeric" 
+            value={weight} 
+            onChangeText={setWeight}
+            selectTextOnFocus // Facilita edição
+          />
+        </View>
+
+        <View style={styles.inputWrapper}>
+          <Text style={styles.inputLabel}>Reps</Text>
+          <TextInput 
+            style={styles.input} 
+            placeholder="0" 
+            keyboardType="numeric" 
+            value={reps} 
+            onChangeText={setReps}
+            selectTextOnFocus
+          />
+        </View>
+
+        <View style={styles.inputWrapper}>
+          <Text style={styles.inputLabel}>RPE (opc)</Text>
+          <TextInput 
+            style={styles.input} 
+            placeholder="-" 
+            keyboardType="numeric" 
+            value={rpe} 
+            onChangeText={setRpe}
+            selectTextOnFocus
+          />
+        </View>
       </View>
+
       <TouchableOpacity style={[styles.buttonPrimary, saving && styles.buttonDisabled]} onPress={handleQuickAdd} disabled={saving}>
         {saving ? <ActivityIndicator color="#fff" /> : (
           <>
-            <Feather name="plus" size={16} color="#fff" />
-            <Text style={styles.buttonTextPrimary}>Adicionar Agora</Text>
+            <Feather name="plus-circle" size={18} color="#fff" />
+            <Text style={styles.buttonTextPrimary}>Registrar Série</Text>
           </>
         )}
       </TouchableOpacity>
@@ -126,44 +177,52 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  // Pega o último item do histórico (assumindo que vem ordenado por data ASC do backend, o último é o mais recente)
+  const lastSet = history.length > 0 ? history[history.length - 1] : undefined;
+
   return (
     <View style={styles.ninhoContainer}>
-      <QuickAddForm definitionId={definitionId} onSetAdded={loadHistory} />
       
-      <View style={styles.ninhoActionRow}>
-         <TouchableOpacity style={styles.ninhoButton} onPress={onShowAnalytics}>
-            <Feather name="bar-chart-2" size={16} color="#007AFF" />
-            <Text style={styles.ninhoButtonText}>Ver Gráficos</Text>
-         </TouchableOpacity>
-         <View style={styles.sep} />
-         <TouchableOpacity style={styles.ninhoButton} onPress={onOpenMenu}>
-            <Feather name="settings" size={16} color="#007AFF" />
-            <Text style={styles.ninhoButtonText}>Opções</Text>
-         </TouchableOpacity>
+      <View style={styles.ninhoHeader}>
+         <View style={styles.ninhoHeaderLeft}>
+            <Feather name="clock" size={14} color="#718096" />
+            <Text style={styles.ninhoHeaderTitle}>Histórico Recente</Text>
+         </View>
+         <View style={styles.ninhoActions}>
+            <TouchableOpacity style={styles.iconBtn} onPress={onShowAnalytics}>
+              <Feather name="bar-chart-2" size={20} color="#007AFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.iconBtn} onPress={onOpenMenu}>
+              <Feather name="more-horizontal" size={20} color="#4A5568" />
+            </TouchableOpacity>
+         </View>
       </View>
 
-      {/* CABEÇALHO DA TABELA */}
-      <View style={styles.tableHeader}>
-         <Text style={[styles.colDate, styles.headerText]}>DATA</Text>
-         <Text style={[styles.colSet, styles.headerText]}>SET</Text>
-         <Text style={[styles.colLoad, styles.headerText]}>CARGA/REPS</Text>
-      </View>
-
+      {/* TABELA DE HISTÓRICO */}
       {loading ? <ActivityIndicator style={{ marginVertical: 20 }} /> : (
         <View style={styles.historyList}>
-          {history.length === 0 ? <Text style={styles.historyEmpty}>Nenhuma série encontrada.</Text> : history.slice().reverse().map((item, index) => (
-            <View key={`history-${definitionId}-${index}`} style={styles.historyRow}>
-              <Text style={styles.colDate}>{formatDate(item.workout_date)}</Text>
-              <Text style={styles.colSet}>#{item.set_number}</Text>
-              
-              <View style={styles.colLoadContainer}>
-                 <Text style={styles.loadText}>{item.weight}kg x {item.reps}</Text>
-                 {item.is_pr && <Feather name="award" size={14} color="#D69E2E" style={{marginLeft: 4}} />}
+          {history.length === 0 ? (
+            <Text style={styles.historyEmpty}>Nenhuma série registrada.</Text>
+          ) : (
+            history.slice().reverse().slice(0, 5).map((item, index) => ( // Mostra apenas as últimas 5
+              <View key={`history-${definitionId}-${index}`} style={styles.historyRow}>
+                <Text style={styles.colDate}>{formatDate(item.workout_date)}</Text>
+                <View style={styles.colData}>
+                   <Text style={styles.dataText}>{item.weight}kg <Text style={styles.xText}>x</Text> {item.reps}</Text>
+                   {item.is_pr && <Feather name="award" size={14} color="#D69E2E" style={{marginLeft: 6}} />}
+                </View>
               </View>
-            </View>
-          ))}
+            ))
+          )}
         </View>
       )}
+
+      {/* FORMULÁRIO COM PREENCHIMENTO AUTOMÁTICO */}
+      <QuickAddForm 
+        definitionId={definitionId} 
+        onSetAdded={loadHistory} 
+        lastSet={lastSet} // Passamos a última série aqui
+      />
     </View>
   );
 };
@@ -172,7 +231,7 @@ type CatalogScreenProps = NativeStackScreenProps<RootStackParamList, 'ExerciseCa
 
 export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps) {
   const {
-    loading, allExercises, filteredExercises, handleCreateExercise, handleRenameExercise,
+    loading, filteredExercises, handleCreateExercise, handleRenameExercise,
     handleMergeExercises, handleDeleteExercise, searchTerm, setSearchTerm, loadCatalog
   } = useExerciseCatalog();
 
@@ -208,6 +267,7 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
     });
   }, [navigation, promptToCreateExercise]);
 
+  // ... (Handlers de edição e menu mantidos iguais) ...
   const handleEditInstructions = (item: CatalogExerciseItem) => {
     setEditingDefId(item.exercise_id);
     setEditNotes(item.default_notes || '');
@@ -235,20 +295,8 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Salvar', onPress: async (newName?: string) => {
           if (!newName || newName.trim() === '') return Alert.alert('Erro', 'Nome inválido');
-          
-          const existing = allExercises.find(ex => ex.exercise_name_lowercase === newName.trim().toLowerCase());
-          if (existing) {
-            Alert.alert('Duplicado', `"${newName}" já existe. Mesclar?`, [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Mesclar', onPress: async () => {
-                 const success = await handleMergeExercises(definitionId, existing.exercise_id);
-                 if (success) setExpandedExercise(null);
-              }}
-            ]);
-          } else {
-            const success = await handleRenameExercise(definitionId, newName.trim());
-            if (success) setExpandedExercise(null);
-          }
+          const success = await handleRenameExercise(definitionId, newName.trim());
+          if (success) setExpandedExercise(null);
       }}
     ], 'plain-text', oldNameCapitalized);
   };
@@ -277,6 +325,7 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
   return (
     <View style={styles.container}>
       <TextInput style={styles.searchInput} placeholder="Buscar exercício..." value={searchTerm} onChangeText={setSearchTerm} />
+      
       <FlatList
         data={filteredExercises}
         keyExtractor={(item) => item.exercise_id}
@@ -285,11 +334,17 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
         renderItem={({ item }) => {
           const isExpanded = expandedExercise === item.exercise_id;
           return (
-            <View style={styles.cardContainer}>
+            <View style={[styles.cardContainer, isExpanded && styles.cardExpanded]}>
               <TouchableOpacity style={styles.card} onPress={() => setExpandedExercise(prev => prev === item.exercise_id ? null : item.exercise_id)}>
-                <View style={styles.cardContent}><Text style={styles.cardTitle}>{item.exercise_name_capitalized}</Text></View>
-                <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color="#4A5568" />
+                <View style={styles.cardContent}>
+                   <Text style={styles.cardTitle}>{item.exercise_name_capitalized}</Text>
+                   <Text style={styles.cardSubtitle}>
+                      {item.total_sets > 0 ? `${item.total_sets} séries registradas` : 'Nunca realizado'}
+                   </Text>
+                </View>
+                <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color="#A0AEC0" />
               </TouchableOpacity>
+              
               {isExpanded && (
                 <ExerciseHistoryNinho
                   definitionId={item.exercise_id}
@@ -306,8 +361,7 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
       <Modal visible={isInstructionModalVisible} transparent animationType="fade" onRequestClose={() => setIsInstructionModalVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Instruções Padrão</Text>
-            <Text style={styles.modalSub}>Aparecerá ao prescrever este exercício.</Text>
+            <Text style={styles.modalTitle}>Instruções</Text>
             <Text style={styles.label}>Link de Vídeo</Text>
             <TextInput style={styles.input} placeholder="https://..." value={editVideo} onChangeText={setEditVideo} autoCapitalize="none" />
             <Text style={styles.label}>Observações</Text>
@@ -332,43 +386,48 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   searchInput: { height: 48, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, paddingHorizontal: 16, fontSize: 16, margin: 16, backgroundColor: '#F7FAFC' },
   emptyList: { textAlign: 'center', marginTop: 32, fontSize: 16, color: '#718096' },
-  cardContainer: { backgroundColor: '#F7FAFC', marginHorizontal: 16, marginBottom: 12, borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' },
+  
+  cardContainer: { backgroundColor: '#FFF', marginHorizontal: 16, marginBottom: 10, borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0' },
+  cardExpanded: { borderColor: '#007AFF', borderWidth: 1 },
   card: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
   cardContent: { flex: 1, marginRight: 10 },
-  cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A202C', textTransform: 'capitalize' },
-  ninhoContainer: { backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#E2E8F0' },
-  ninhoActionRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  ninhoButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
-  ninhoButtonText: { fontSize: 14, fontWeight: '600', color: '#007AFF', marginLeft: 6 },
-  sep: { width: 1, backgroundColor: '#E2E8F0' },
-  
-  // Estilos da Tabela
-  tableHeader: { flexDirection: 'row', backgroundColor: '#F7FAFC', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#EDF2F7' },
-  headerText: { fontSize: 12, fontWeight: '700', color: '#718096' },
-  colDate: { width: 80, fontSize: 14, color: '#4A5568' },
-  colSet: { width: 50, textAlign: 'center', fontSize: 14, color: '#718096' },
-  colLoadContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
-  colLoad: { flex: 1, textAlign: 'right' },
-  loadText: { fontSize: 14, fontWeight: '600', color: '#1A202C', textAlign: 'right' },
+  cardTitle: { fontSize: 16, fontWeight: 'bold', color: '#2D3748' },
+  cardSubtitle: { fontSize: 12, color: '#718096', marginTop: 2 },
 
-  historyList: { maxHeight: 250 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#EDF2F7' },
-  historyEmpty: { fontSize: 14, color: '#718096', textAlign: 'center', padding: 16 },
+  ninhoContainer: { backgroundColor: '#F9FAFB', borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingBottom: 10 },
   
-  quickAddForm: { padding: 16, backgroundColor: '#F7FAFC', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  ninhoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
+  ninhoHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  ninhoHeaderTitle: { fontSize: 12, fontWeight: '600', color: '#718096', textTransform: 'uppercase', letterSpacing: 0.5 },
+  ninhoActions: { flexDirection: 'row', gap: 12 },
+  iconBtn: { padding: 4 },
+  
+  historyList: { marginHorizontal: 16, marginBottom: 12 },
+  historyRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#EDF2F7' },
+  colDate: { fontSize: 13, color: '#718096', width: 80 },
+  colData: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' },
+  dataText: { fontSize: 14, fontWeight: '600', color: '#2D3748' },
+  xText: { fontSize: 12, color: '#CBD5E0', marginHorizontal: 4 },
+  historyEmpty: { fontSize: 13, color: '#A0AEC0', textAlign: 'center', fontStyle: 'italic', paddingVertical: 10 },
+
+  quickAddForm: { padding: 16, backgroundColor: '#EDF2F7', marginHorizontal: 16, marginBottom: 16, borderRadius: 12 },
+  sectionLabel: { fontSize: 12, fontWeight: '700', color: '#4A5568', marginBottom: 8, textTransform: 'uppercase' },
   inputRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
-  inputFlex: { flex: 1 },
-  input: { borderWidth: 1, borderColor: '#ccc', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, fontSize: 16, backgroundColor: '#fff' },
-  buttonPrimary: { backgroundColor: '#007AFF', paddingVertical: 12, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
-  buttonTextPrimary: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  inputWrapper: { flex: 1 },
+  inputLabel: { fontSize: 11, fontWeight: '600', color: '#718096', marginBottom: 4, marginLeft: 2 },
+  input: { borderWidth: 1, borderColor: '#CBD5E0', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, fontSize: 16, backgroundColor: '#FFF', textAlign: 'center', color: '#1A202C' },
+  
+  buttonPrimary: { backgroundColor: '#007AFF', paddingVertical: 12, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  buttonTextPrimary: { color: '#fff', fontSize: 15, fontWeight: '600' },
   buttonDisabled: { backgroundColor: '#A9A9A9' },
+
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: '#FFF', borderRadius: 12, padding: 20 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   modalSub: { fontSize: 13, color: '#718096', marginBottom: 16 },
   label: { fontSize: 14, fontWeight: '600', color: '#2D3748', marginBottom: 6 },
   textArea: { height: 80, textAlignVertical: 'top' },
-  modalActions: { flexDirection: 'row', gap: 12 },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 16 },
   btn: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
   btnCancel: { backgroundColor: '#EDF2F7' },
   btnSave: { backgroundColor: '#007AFF' },
