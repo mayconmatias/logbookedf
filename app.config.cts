@@ -68,9 +68,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     "expo-router",
     [
       "expo-updates",
-      {
-        username: "profmaycon",
-      }
+  {
+    url: "https://u.expo.dev/c69323ab-c81d-444e-821a-4dad327e89f8",
+    releaseChannel: "production",
+    runtimeVersion: "1.0.3"
+  }
     ]
   ],
 });
