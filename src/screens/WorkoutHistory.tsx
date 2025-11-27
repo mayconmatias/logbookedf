@@ -7,21 +7,20 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Calendar, LocaleConfig, DateData } from 'react-native-calendars';
 import { Feather } from '@expo/vector-icons'; 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import WorkoutShareModal from '@/components/WorkoutShareModal'; 
 
-// Importa os tipos globais
 import type { RootStackParamList } from "@/types/navigation";
 import type { 
   WorkoutHistoryItem, 
-  WorkoutExercise,
   HistoricalRepPR,
   HistoricalWeightPR,
   WorkoutSet 
 } from "@/types/workout"; 
 import { supabase } from "@/lib/supabaseClient";
+import { fetchCurrentOpenSession } from '@/services/workouts.service';
 
-// Habilita animações no Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -30,35 +29,19 @@ LocaleConfig.locales['pt-br'] = { monthNames: ['Janeiro', 'Fevereiro', 'Março',
 LocaleConfig.defaultLocale = 'pt-br';
 
 type WorkoutHistoryProps = NativeStackScreenProps<RootStackParamList, "WorkoutHistory">;
-
 const workoutDot = { color: '#007AFF', key: 'workout' };
 
-// --- Helper para agrupar séries (Lógica similar ao ShareableCard) ---
 const getGroupedSetsSummary = (sets: WorkoutSet[]) => {
   if (!sets || sets.length === 0) return [];
-
   const groups: { count: number; weight: number; reps: number; side?: string }[] = [];
-
   sets.forEach(set => {
-    if (set.weight === 0 && set.reps === 0) return; // Ignora ghost sets
-
+    if (set.weight === 0 && set.reps === 0) return;
     const existing = groups.find(
       g => g.weight === set.weight && g.reps === set.reps && g.side === set.side
     );
-
-    if (existing) {
-      existing.count += 1;
-    } else {
-      groups.push({
-        count: 1,
-        weight: set.weight,
-        reps: set.reps,
-        side: set.side,
-      });
-    }
+    if (existing) { existing.count += 1; } 
+    else { groups.push({ count: 1, weight: set.weight, reps: set.reps, side: set.side }); }
   });
-
-  // Formata para string
   return groups.map(g => {
     const side = g.side ? ` (${g.side})` : '';
     return `${g.count} x ${g.weight}kg - ${g.reps} reps${side}`;
@@ -70,17 +53,14 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
   const [workouts, setWorkouts] = useState<WorkoutHistoryItem[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [workoutMarkers, setWorkoutMarkers] = useState<Record<string, any>>({});
- 
-  // Controle de expansão dos cards (Set de IDs)
   const [expandedWorkoutIds, setExpandedWorkoutIds] = useState<Set<string>>(new Set());
-
   const [isWorkoutShareModalVisible, setIsWorkoutShareModalVisible] = useState(false);
   const [workoutToShare, setWorkoutToShare] = useState<WorkoutHistoryItem | null>(null);
-  
   const [isFetchingPRs, setIsFetchingPRs] = useState(false);
   const [repPRs, setRepPRs] = useState<HistoricalRepPR[]>([]);
   const [weightPRs, setWeightPRs] = useState<HistoricalWeightPR[]>([]);
-
+  
+  const [openSessionId, setOpenSessionId] = useState<string | null>(null);
   const highlightId = route.params?.highlightWorkoutId;
 
   useEffect(() => {
@@ -94,7 +74,7 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     if (loading || !highlightId || isWorkoutShareModalVisible) return;
     const workoutToShare = workouts.find(w => w.id === highlightId);
     if (workoutToShare) {
-      // Se veio de um redirecionamento, expande o card automaticamente
+      // [RESTAURADO] Usando a função restaurada
       toggleExpand(highlightId); 
       navigation.setParams({ highlightWorkoutId: undefined });
     } 
@@ -105,6 +85,9 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      const openSession = await fetchCurrentOpenSession();
+      setOpenSessionId(openSession?.id || null);
 
       const { data, error } = await supabase
         .from('workouts')
@@ -145,6 +128,7 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
       });
 
       setWorkouts(historyItems);
+      // [RESTAURADO] Chamada da função restaurada
       processWorkoutsForMarking(historyItems);
     } catch (e: any) {
       Alert.alert("Erro ao buscar histórico", e.message);
@@ -153,6 +137,7 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     }
   };
 
+  // [RESTAURADO] Função de marcação no calendário
   const processWorkoutsForMarking = (workoutsData: WorkoutHistoryItem[]) => {
     const workoutsPerDay: { [date: string]: WorkoutHistoryItem[] } = {};
     workoutsData.forEach(workout => {
@@ -171,6 +156,7 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     setWorkoutMarkers(markers);
   };
   
+  // [RESTAURADO] useMemo do calendário
   const combinedMarkedDates = useMemo(() => {
     const newMarkedDates = { ...workoutMarkers };
     if (newMarkedDates[selectedDate]) {
@@ -181,6 +167,7 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     return newMarkedDates;
   }, [workoutMarkers, selectedDate]);
 
+  // [RESTAURADO] Função de expandir card
   const toggleExpand = (id: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedWorkoutIds(prev => {
@@ -194,6 +181,7 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     });
   };
 
+  // [RESTAURADO] Menu de opções
   const handleOpenWorkoutMenu = (workout: WorkoutHistoryItem) => {
     Alert.alert(
       `Opções do Treino`,
@@ -217,7 +205,8 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
       ]
     );
   };
- 
+
+  // [RESTAURADO] Deletar treino
   const handleDeleteWorkout = (workoutId: string) => {
     Alert.alert(
       "Deletar Treino",
@@ -248,10 +237,12 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     );
   };
 
+  // [RESTAURADO] Share Press
   const handleSharePress = (workout: WorkoutHistoryItem) => {
     openShareModal(workout);
   };
 
+  // [RESTAURADO] Abrir modal de share
   const openShareModal = async (workout: WorkoutHistoryItem) => {
     setIsFetchingPRs(true);
     setWorkoutToShare(workout); 
@@ -293,12 +284,17 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     }
   };
  
+  // [RESTAURADO] Fechar modal
   const closeWorkoutShareModal = () => {
     setIsWorkoutShareModalVisible(false);
     setWorkoutToShare(null);
     setRepPRs([]); 
     setWeightPRs([]);
   }
+
+  const handleResumeSession = (workoutId: string) => {
+     navigation.navigate('LogWorkout', { workoutId });
+  };
 
   const workoutsOnSelectedDate = workouts.filter(w => w.workout_date === selectedDate);
 
@@ -335,23 +331,26 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
 
         {!loading && workoutsOnSelectedDate.map(workout => {
           const isExpanded = expandedWorkoutIds.has(workout.id);
+          const isOpen = workout.id === openSessionId;
 
           return (
             <TouchableOpacity
               key={workout.id}
-              style={styles.workoutCard}
+              style={[styles.workoutCard, isOpen && styles.activeWorkoutCard]}
               onPress={() => toggleExpand(workout.id)}
               onLongPress={() => handleOpenWorkoutMenu(workout)}
               delayLongPress={500}
               activeOpacity={0.7}
             >
               <View style={styles.cardHeader}>
-                <Text style={styles.workoutCardTitle}>
-                  {workout.template_name}
-                </Text>
+                <View style={{flex: 1}}>
+                  <Text style={styles.workoutCardTitle}>
+                    {workout.template_name}
+                  </Text>
+                  {isOpen && <Text style={styles.activeLabel}>EM ANDAMENTO</Text>}
+                </View>
 
                 <View style={styles.buttonRow}>
-                   {/* Botão de Share Mantido, mas isolado */}
                   <TouchableOpacity 
                     style={styles.iconButton}
                     onPress={() => handleSharePress(workout)}
@@ -359,7 +358,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
                     <Feather name="share" size={20} color="#007AFF" />
                   </TouchableOpacity>
                   
-                  {/* Ícone de Seta para indicar expansão */}
                   <View style={styles.iconButton}>
                      <Feather 
                        name={isExpanded ? "chevron-up" : "chevron-down"} 
@@ -370,30 +368,17 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
                 </View>
               </View>
               
-              {/* Conteúdo: Lista de Exercícios */}
               <View>
                 {workout.performed_data.map((ex, index) => {
                   const setsSummary = getGroupedSetsSummary(ex.sets);
-                  
                   return (
                     <View key={index} style={styles.exerciseRow}>
-                      {/* Nome do Exercício */}
-                      <Text style={styles.exerciseTitle}>
-                         • {ex.name}
-                      </Text>
-                      
-                      {/* Detalhes (Aparecem só se expandido) */}
+                      <Text style={styles.exerciseTitle}>• {ex.name}</Text>
                       {isExpanded && (
                         <View style={styles.setsContainer}>
                            {setsSummary.length > 0 ? (
-                             setsSummary.map((line, idx) => (
-                               <Text key={idx} style={styles.setText}>
-                                  {line}
-                               </Text>
-                             ))
-                           ) : (
-                             <Text style={styles.setText}>Sem séries registradas.</Text>
-                           )}
+                             setsSummary.map((line, idx) => <Text key={idx} style={styles.setText}>{line}</Text>)
+                           ) : <Text style={styles.setText}>Sem séries.</Text>}
                         </View>
                       )}
                     </View>
@@ -401,7 +386,13 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
                 })}
               </View>
               
-              {/* Dica Visual no Rodapé do Card quando recolhido */}
+              {isOpen && isExpanded && (
+                 <TouchableOpacity style={styles.resumeButton} onPress={() => handleResumeSession(workout.id)}>
+                    <Text style={styles.resumeButtonText}>Retomar Treino</Text>
+                    <Feather name="arrow-right" size={16} color="#FFF" />
+                 </TouchableOpacity>
+              )}
+
               {!isExpanded && (
                  <Text style={styles.hintText}>Toque para ver detalhes • Segure para editar</Text>
               )}
@@ -426,7 +417,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
-    // Sombra mais bonita
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
@@ -434,6 +424,10 @@ const styles = StyleSheet.create({
     elevation: 3,
     borderWidth: 1,
     borderColor: '#E2E8F0'
+  },
+  activeWorkoutCard: {
+    borderColor: '#007AFF',
+    backgroundColor: '#F0F9FF'
   },
   cardHeader: {
     flexDirection: 'row',
@@ -447,44 +441,32 @@ const styles = StyleSheet.create({
   workoutCardTitle: {
     fontSize: 18,
     fontWeight: '700',
-    flex: 1,
     color: '#2D3748', 
   },
-  buttonRow: {
-    flexDirection: 'row',
-    alignItems: 'center'
-  },
-  iconButton: {
-    padding: 8,
-    marginLeft: 4,
-  },
-  
-  exerciseRow: {
-    marginBottom: 8,
-  },
-  exerciseTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#4A5568',
-    marginBottom: 2,
-  },
-  setsContainer: {
-    paddingLeft: 14,
-    marginTop: 2,
-    marginBottom: 6,
-    borderLeftWidth: 2,
-    borderLeftColor: '#E2E8F0'
-  },
-  setText: {
-    fontSize: 14,
-    color: '#718096',
-    lineHeight: 20,
-  },
-  hintText: {
+  activeLabel: {
     fontSize: 12,
-    color: '#A0AEC0',
-    marginTop: 8,
-    textAlign: 'center',
-    fontStyle: 'italic'
-  }
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginTop: 2
+  },
+  buttonRow: { flexDirection: 'row', alignItems: 'center' },
+  iconButton: { padding: 8, marginLeft: 4 },
+  
+  exerciseRow: { marginBottom: 8 },
+  exerciseTitle: { fontSize: 16, fontWeight: '600', color: '#4A5568', marginBottom: 2 },
+  setsContainer: { paddingLeft: 14, marginTop: 2, marginBottom: 6, borderLeftWidth: 2, borderLeftColor: '#E2E8F0' },
+  setText: { fontSize: 14, color: '#718096', lineHeight: 20 },
+  hintText: { fontSize: 12, color: '#A0AEC0', marginTop: 8, textAlign: 'center', fontStyle: 'italic' },
+
+  resumeButton: {
+    backgroundColor: '#007AFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 12,
+    gap: 8
+  },
+  resumeButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 }
 });

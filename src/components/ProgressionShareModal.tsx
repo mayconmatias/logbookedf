@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
+// [CORREÇÃO] Usar insets manuais em vez de SafeAreaView wrapper
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
@@ -39,9 +41,9 @@ export default function ProgressionShareModal({
 }: ProgressionShareModalProps) {
   const viewShotRef = useRef<ViewShot>(null);
   const [bgOpacity, setBgOpacity] = useState<number>(1);
+  const insets = useSafeAreaInsets(); // [NOVO]
 
   const handleShare = async () => {
-    // Evita compartilhar card vazio ou sem histórico
     if (!set || !progression || progression.length === 0) {
       Alert.alert(
         'Aguarde',
@@ -76,48 +78,55 @@ export default function ProgressionShareModal({
       animationType="fade"
       onRequestClose={onClose}
     >
+      {/* [CORREÇÃO] Trocado SafeAreaView por View e justifyContent: space-between */}
       <View style={styles.modalContainer}>
-        <ViewShot ref={viewShotRef} options={{ format: 'png', quality: 0.9 }}>
-          <ProgressionShareCard
-            exerciseName={exerciseName}
-            set={set}
-            progression={progression}
-            bgOpacity={bgOpacity}
-            currentSessionTEV={currentSessionTEV}
-          />
-        </ViewShot>
-
-        <View style={styles.sliderContainer}>
-          <Text style={styles.sliderLabel}>Transparência do fundo</Text>
-          <Slider
-            style={styles.slider}
-            minimumValue={0}
-            maximumValue={1}
-            value={bgOpacity}
-            onValueChange={setBgOpacity}
-            minimumTrackTintColor="#FFFFFF"
-            maximumTrackTintColor="#4A5568"
-            thumbTintColor="#FFFFFF"
-          />
+        
+        {/* HEADER (Topo Esquerdo) com margem segura manual */}
+        <View style={[styles.topHeader, { marginTop: insets.top > 0 ? insets.top : 20 }]}>
+           <TouchableOpacity 
+              style={styles.closeButtonTop} 
+              onPress={onClose}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+           >
+              <Feather name="x" size={24} color="#FFF" />
+           </TouchableOpacity>
         </View>
 
-        <View style={styles.modalActions}>
+        {/* Conteúdo Centralizado */}
+        <View style={styles.centerContent}>
+          <ViewShot ref={viewShotRef} options={{ format: 'png', quality: 0.9 }}>
+            <ProgressionShareCard
+              exerciseName={exerciseName}
+              set={set}
+              progression={progression}
+              bgOpacity={bgOpacity}
+              currentSessionTEV={currentSessionTEV}
+            />
+          </ViewShot>
+        </View>
+
+        {/* Controles Inferiores */}
+        <View style={styles.bottomControls}>
+          <View style={styles.sliderContainer}>
+            <Text style={styles.sliderLabel}>Transparência do fundo</Text>
+            <Slider
+              style={styles.slider}
+              minimumValue={0}
+              maximumValue={1}
+              value={bgOpacity}
+              onValueChange={setBgOpacity}
+              minimumTrackTintColor="#FFFFFF"
+              maximumTrackTintColor="#4A5568"
+              thumbTintColor="#FFFFFF"
+            />
+          </View>
+
           <TouchableOpacity
             style={[styles.modalButton, styles.modalButtonShare]}
             onPress={handleShare}
           >
             <Feather name="share" size={16} color="#fff" />
             <Text style={styles.modalButtonText}>Compartilhar</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.modalButton, styles.modalButtonClose]}
-            onPress={onClose}
-          >
-            <Feather name="x" size={16} color="#333" />
-            <Text style={[styles.modalButtonText, { color: '#333' }]}>
-              Fechar
-            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -128,16 +137,43 @@ export default function ProgressionShareModal({
 const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'space-between', // Distribui verticalmente
+  },
+  topHeader: {
+    width: '100%',
+    paddingHorizontal: 16,
+    paddingVertical: 0,
+    alignItems: 'flex-start',
+    zIndex: 10,
+    height: 60, 
+    justifyContent: 'center',
+  },
+  closeButtonTop: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    paddingHorizontal: 16,
+  },
+  centerContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bottomControls: {
+    paddingBottom: 40, // Espaço extra para segurança em telas curvadas
+    alignItems: 'center',
+    width: '100%',
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(0,0,0,0.3)', // Fundo leve para destacar controles
+    paddingTop: 20,
   },
   sliderContainer: {
     width: '100%',
     alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 4,
+    marginBottom: 16,
   },
   sliderLabel: {
     color: '#FFFFFF',
@@ -148,29 +184,21 @@ const styles = StyleSheet.create({
     width: 240,
     height: 40,
   },
-  modalActions: {
-    flexDirection: 'row',
-    marginTop: 16,
-    gap: 8,
-  },
   modalButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: '#3A3A3C',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 30,
+    backgroundColor: '#007AFF',
   },
   modalButtonShare: {
     backgroundColor: '#007AFF',
   },
-  modalButtonClose: {
-    backgroundColor: '#E5E5EA',
-  },
   modalButtonText: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: 'bold',
     marginLeft: 8,
   },
 });

@@ -16,11 +16,11 @@ import {
   Alert,
   Modal,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Keyboard 
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/types/navigation';
-// [MIGRAÇÃO] Apenas Feather
 import { Feather } from '@expo/vector-icons';
 
 import {
@@ -42,6 +42,12 @@ import t from '@/i18n/pt';
 import { useExerciseCatalog } from '@/hooks/useExerciseCatalog';
 import { WorkoutExercise } from '@/types/workout';
 
+// [NOVO] Helper para formatação
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear().toString().slice(2)}`;
+};
+
 interface QuickAddFormProps {
   definitionId: string;
   onSetAdded: () => void;
@@ -56,6 +62,7 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, onSetAdded })
   const handleQuickAdd = async () => {
     if (!weight || !reps) return Alert.alert(t.common.attention, 'Peso e Reps são obrigatórios.');
     setSaving(true);
+    Keyboard.dismiss();
     try {
       const todayWorkoutId = await getOrCreateTodayWorkoutId();
       const exerciseInstanceId = await getOrCreateExerciseInWorkout(todayWorkoutId, definitionId);
@@ -91,7 +98,7 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, onSetAdded })
         {saving ? <ActivityIndicator color="#fff" /> : (
           <>
             <Feather name="plus" size={16} color="#fff" />
-            <Text style={styles.buttonTextPrimary}>Adicionar Série</Text>
+            <Text style={styles.buttonTextPrimary}>Adicionar Agora</Text>
           </>
         )}
       </TouchableOpacity>
@@ -122,25 +129,37 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
   return (
     <View style={styles.ninhoContainer}>
       <QuickAddForm definitionId={definitionId} onSetAdded={loadHistory} />
-      <View style={styles.ninhoHeader}>
-        <TouchableOpacity style={styles.ninhoButton} onPress={onShowAnalytics}>
-          <Feather name="info" size={16} color="#007AFF" />
-          <Text style={styles.ninhoButtonText}>Ver Informações</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.ninhoButton} onPress={onOpenMenu}>
-          <Feather name="more-vertical" size={16} color="#555" />
-          <Text style={styles.ninhoButtonText}>Opções</Text>
-        </TouchableOpacity>
+      
+      <View style={styles.ninhoActionRow}>
+         <TouchableOpacity style={styles.ninhoButton} onPress={onShowAnalytics}>
+            <Feather name="bar-chart-2" size={16} color="#007AFF" />
+            <Text style={styles.ninhoButtonText}>Ver Gráficos</Text>
+         </TouchableOpacity>
+         <View style={styles.sep} />
+         <TouchableOpacity style={styles.ninhoButton} onPress={onOpenMenu}>
+            <Feather name="settings" size={16} color="#007AFF" />
+            <Text style={styles.ninhoButtonText}>Opções</Text>
+         </TouchableOpacity>
       </View>
+
+      {/* CABEÇALHO DA TABELA */}
+      <View style={styles.tableHeader}>
+         <Text style={[styles.colDate, styles.headerText]}>DATA</Text>
+         <Text style={[styles.colSet, styles.headerText]}>SET</Text>
+         <Text style={[styles.colLoad, styles.headerText]}>CARGA/REPS</Text>
+      </View>
+
       {loading ? <ActivityIndicator style={{ marginVertical: 20 }} /> : (
         <View style={styles.historyList}>
           {history.length === 0 ? <Text style={styles.historyEmpty}>Nenhuma série encontrada.</Text> : history.slice().reverse().map((item, index) => (
             <View key={`history-${definitionId}-${index}`} style={styles.historyRow}>
-              <Text style={styles.historyDate}>{new Date(item.workout_date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })}</Text>
-              <Text style={styles.historySet}>Série {item.set_number}</Text>
-              <Text style={styles.historyDetails}>{item.weight}kg x {item.reps} reps</Text>
-              {/* Ícone de PR (Award no Feather) */}
-              {item.is_pr && <Feather name="award" size={14} color="#D69E2E" style={styles.prIcon} />}
+              <Text style={styles.colDate}>{formatDate(item.workout_date)}</Text>
+              <Text style={styles.colSet}>#{item.set_number}</Text>
+              
+              <View style={styles.colLoadContainer}>
+                 <Text style={styles.loadText}>{item.weight}kg x {item.reps}</Text>
+                 {item.is_pr && <Feather name="award" size={14} color="#D69E2E" style={{marginLeft: 4}} />}
+              </View>
             </View>
           ))}
         </View>
@@ -182,7 +201,7 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <TouchableOpacity onPress={promptToCreateExercise} style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+        <TouchableOpacity onPress={promptToCreateExercise} style={{ paddingHorizontal: 16 }}>
           <Feather name="plus" size={28} color="#007AFF" />
         </TouchableOpacity>
       ),
@@ -246,9 +265,9 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
 
   const handleOpenMenu = (item: CatalogExerciseItem) => {
     Alert.alert(`Opções para "${item.exercise_name_capitalized}"`, 'Escolha uma ação:', [
-      { text: 'Editar Instruções Padrão', onPress: () => handleEditInstructions(item) },
-      { text: 'Editar Nome', onPress: () => handleEditName(item.exercise_id, item.exercise_name_capitalized) },
-      { text: 'Deletar Histórico', style: 'destructive', onPress: () => handleDeleteHistoryWithConfirm(item.exercise_id, item.exercise_name_capitalized) },
+      { text: 'Editar Instruções', onPress: () => handleEditInstructions(item) },
+      { text: 'Renomear', onPress: () => handleEditName(item.exercise_id, item.exercise_name_capitalized) },
+      { text: 'Limpar Histórico', style: 'destructive', onPress: () => handleDeleteHistoryWithConfirm(item.exercise_id, item.exercise_name_capitalized) },
       { text: 'Cancelar', style: 'cancel' }
     ]);
   };
@@ -284,7 +303,6 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
         }}
       />
 
-      {/* Modal de Instruções */}
       <Modal visible={isInstructionModalVisible} transparent animationType="fade" onRequestClose={() => setIsInstructionModalVisible(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -319,16 +337,24 @@ const styles = StyleSheet.create({
   cardContent: { flex: 1, marginRight: 10 },
   cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A202C', textTransform: 'capitalize' },
   ninhoContainer: { backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#E2E8F0' },
-  ninhoHeader: { flexDirection: 'row', justifyContent: 'flex-start', padding: 16, gap: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  ninhoButton: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ninhoButtonText: { fontSize: 14, fontWeight: '500', color: '#007AFF' },
-  historyList: { paddingHorizontal: 16, paddingVertical: 8, maxHeight: 300 },
-  historyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#EDF2F7' },
-  historyDate: { fontSize: 14, color: '#4A5568', width: 80 },
-  historySet: { fontSize: 14, color: '#718096', width: 60 },
-  historyDetails: { flex: 1, fontSize: 14, fontWeight: '500', color: '#1A202C' },
-  prIcon: { marginLeft: 8 },
+  ninhoActionRow: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  ninhoButton: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
+  ninhoButtonText: { fontSize: 14, fontWeight: '600', color: '#007AFF', marginLeft: 6 },
+  sep: { width: 1, backgroundColor: '#E2E8F0' },
+  
+  // Estilos da Tabela
+  tableHeader: { flexDirection: 'row', backgroundColor: '#F7FAFC', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#EDF2F7' },
+  headerText: { fontSize: 12, fontWeight: '700', color: '#718096' },
+  colDate: { width: 80, fontSize: 14, color: '#4A5568' },
+  colSet: { width: 50, textAlign: 'center', fontSize: 14, color: '#718096' },
+  colLoadContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
+  colLoad: { flex: 1, textAlign: 'right' },
+  loadText: { fontSize: 14, fontWeight: '600', color: '#1A202C', textAlign: 'right' },
+
+  historyList: { maxHeight: 250 },
+  historyRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#EDF2F7' },
   historyEmpty: { fontSize: 14, color: '#718096', textAlign: 'center', padding: 16 },
+  
   quickAddForm: { padding: 16, backgroundColor: '#F7FAFC', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   inputRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
   inputFlex: { flex: 1 },

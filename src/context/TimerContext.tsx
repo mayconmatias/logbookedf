@@ -1,23 +1,30 @@
 import React, { createContext, useState, useEffect, useContext, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { navigate } from '@/utils/navigationRef'; 
 
-// [CORREÇÃO] Adicionadas propriedades obrigatórias para o Expo 54
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Configuração Segura de Notificações para Expo Go
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+} catch (e) {
+  console.log("Notifications handler skipped (Expo Go limitations)");
+}
 
-const PRESETS_KEY = '@timer_presets';
-const DEFAULT_PRESETS = [60, 90, 120, 180, 300]; 
+// [CORREÇÃO] Chave v2 para limpar cache antigo
+const PRESETS_KEY = '@timer_presets_v2';
+// [CORREÇÃO] 120s (2 min) é o primeiro item (índice 0)
+const DEFAULT_PRESETS = [120, 60, 90]; 
 
 interface TimerContextData {
   secondsRemaining: number;
@@ -49,20 +56,41 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     const initialize = async () => {
       try {
-        const savedPresets = await AsyncStorage.getItem(PRESETS_KEY);
-        if (savedPresets) {
-          setPresets(JSON.parse(savedPresets));
+        // 1. Verifica se é PRO
+        let userIsPro = false;
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data } = await supabase
+              .from('profiles')
+              .select('subscription_plan')
+              .eq('id', user.id)
+              .single();
+            if (data && data.subscription_plan === 'coach_pro') {
+              userIsPro = true;
+              setIsPro(true);
+            }
+          }
+        } catch (err) {
+          console.log("Auth check failed (offline?):", err);
         }
 
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('subscription_plan')
-            .eq('id', user.id)
-            .single();
-          if (data && data.subscription_plan === 'coach_pro') setIsPro(true);
+        // 2. Carrega Presets
+        const savedPresets = await AsyncStorage.getItem(PRESETS_KEY);
+        if (savedPresets) {
+          const parsed = JSON.parse(savedPresets);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPresets(parsed);
+          }
+        } else {
+          setPresets(DEFAULT_PRESETS);
         }
+
+        // 3. Garante que não-PRO esteja no index 0 (120s)
+        if (!userIsPro) {
+          setActivePresetIndex(0);
+        }
+
       } catch (e) { console.log(e); }
     };
     initialize();
@@ -79,7 +107,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const startTimer = useCallback((seconds?: number) => {
-    const duration = seconds || presets[activePresetIndex];
+    const duration = seconds || presets[activePresetIndex] || 120;
+    
     const now = Date.now();
     const target = now + (duration * 1000);
 
@@ -87,18 +116,21 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsActive(true);
     notificationScheduled.current = false;
 
-    Notifications.scheduleNotificationAsync({
-      content: {
-        title: "Descanso Finalizado! 🔔",
-        body: "Hora da próxima série.",
-        sound: true,
-      },
-      trigger: { 
-        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-        seconds: duration,
-        repeats: false
-      },
-    });
+    // Tentativa segura de notificação
+    try {
+      Notifications.scheduleNotificationAsync({
+        content: {
+          title: "Descanso Finalizado! 🔔",
+          body: "Hora da próxima série.",
+          sound: true,
+        },
+        trigger: { 
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: duration,
+          repeats: false
+        },
+      }).catch(() => {});
+    } catch (e) {}
 
     if (timerInterval.current) clearInterval(timerInterval.current);
 
@@ -116,8 +148,10 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [presets, activePresetIndex]);
 
   const triggerFinishFeedback = async () => {
-    if (Platform.OS === 'ios') {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (Platform.OS !== 'web') {
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch (e) {}
     }
   };
 
@@ -125,11 +159,23 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (timerInterval.current) clearInterval(timerInterval.current);
     setIsActive(false);
     setSecondsRemaining(0);
-    Notifications.cancelAllScheduledNotificationsAsync();
+    try {
+      Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
+    } catch(e) {}
   }, []);
 
   const selectPreset = (index: number) => {
-    if (!isPro && index !== 0) return; 
+    if (!isPro && index !== 0) {
+       Alert.alert(
+        'Funcionalidade PRO', 
+        'Assine o Coach PRO para usar tempos personalizados.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Ver Planos', onPress: () => navigate('CoachPaywall') }
+        ]
+      );
+      return; 
+    }
     setActivePresetIndex(index);
   };
 

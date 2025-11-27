@@ -20,7 +20,6 @@ import { Program, PlannedWorkout } from '@/types/coaching';
 
 type HomeProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
-// [ATUALIZADO] Suporta a nova coluna
 type OpenSession = { 
   id: string; 
   template_id: string | null;
@@ -36,6 +35,7 @@ export default function Home({ navigation }: HomeProps) {
   
   const [loadingPlan, setLoadingPlan] = useState(true);
 
+  // 1. Carrega dados do usuário (apenas uma vez ou quando foca, mas aqui deixamos no focus para garantir atualização de plano)
   useFocusEffect(
     useCallback(() => {
       const loadUserData = async () => {
@@ -59,16 +59,21 @@ export default function Home({ navigation }: HomeProps) {
     }, [])
   );
 
+  // 2. Carrega Dashboard (Plano + Sessão Atual)
+  // Roda toda vez que a tela ganha foco -> Garante botão azul ao voltar
   useFocusEffect(
     useCallback(() => {
       const loadDashboard = async () => {
-        setLoadingPlan(true);
+        // Opcional: setLoadingPlan(true) aqui faria um spinner aparecer toda vez que volta. 
+        // Para UX mais fluida, podemos deixar sem o loading intrusivo se já tiver dados carregados, 
+        // mas para garantir consistência visual no MVP, vamos manter.
+        setLoadingPlan(true); 
         try {
           const plan = await fetchStudentActivePlan();
           setActivePlan(plan);
 
           const session = await fetchCurrentOpenSession();
-          setCurrentSession(session); // O TypeScript agora aceita pois atualizamos o tipo
+          setCurrentSession(session); 
 
         } catch (e) {
           console.log('Erro dashboard:', e);
@@ -85,9 +90,13 @@ export default function Home({ navigation }: HomeProps) {
       headerRight: () => (
         <TouchableOpacity
           onPress={() => navigation.navigate('Profile')}
-          style={{ padding: 8, marginRight: 8 }}
+          // [UI] Área de toque aumentada
+          hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+          style={{ marginRight: 8 }}
         >
-          <Feather name="user" size={24} color="#007AFF" />
+          <View style={styles.profileIconBg}>
+             <Feather name="user" size={22} color="#007AFF" />
+          </View>
         </TouchableOpacity>
       ),
       headerBackVisible: false,
@@ -97,10 +106,6 @@ export default function Home({ navigation }: HomeProps) {
   const logout = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) Alert.alert('Erro', error.message);
-  };
-
-  const handleHistoryPress = () => {
-    navigation.navigate('WorkoutHistory', {});
   };
 
   const handleStartWorkout = (plannedWorkoutId?: string) => {
@@ -115,18 +120,19 @@ export default function Home({ navigation }: HomeProps) {
     }
   };
 
-  // [ATUALIZADO] Verifica se é Treino Livre (ambos nulos)
+  // Lógica do Botão Principal:
+  // Se tem sessão aberta E não é de um template específico (ou seja, é livre), mostra "Retomar"
   const isFreeWorkoutOpen = currentSession && !currentSession.template_id && !currentSession.planned_workout_id;
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <Text style={styles.welcomeText}>
         Bem-vindo, {displayName || 'Atleta'}
       </Text>
 
-      {/* ÁREA DE TREINO PRESCRITO */}
+      {/* ÁREA DE TREINO PRESCRITO (COACH) */}
       {loadingPlan ? (
-        <ActivityIndicator color="#007AFF" style={{ marginBottom: 20 }} />
+        <ActivityIndicator color="#007AFF" style={{ marginBottom: 20, marginTop: 20 }} />
       ) : activePlan ? (
         <View style={styles.planCard}>
           <Text style={styles.planTitle}>📋 {activePlan.program.name}</Text>
@@ -138,7 +144,7 @@ export default function Home({ navigation }: HomeProps) {
           </Text>
           
           {activePlan.workouts.map((workout) => {
-            // [ATUALIZADO] Compara com o campo correto do Coach
+            // Verifica se ESTE treino específico está aberto
             const isOpen = currentSession?.planned_workout_id === workout.id;
 
             return (
@@ -152,10 +158,10 @@ export default function Home({ navigation }: HomeProps) {
               >
                 <View style={[styles.workoutIcon, isOpen && styles.workoutIconActive]}>
                   {isOpen ? (
-                    <Feather name="bar-chart" size={18} color="#FFF" />
+                    <Feather name="bar-chart-2" size={18} color="#FFF" />
                   ) : (
                     <Text style={[styles.workoutLetter, isOpen && { color: '#FFF' }]}>
-                      {workout.name.charAt(0)}
+                      {workout.name.charAt(0).toUpperCase()}
                     </Text>
                   )}
                 </View>
@@ -184,12 +190,12 @@ export default function Home({ navigation }: HomeProps) {
         </View>
       ) : null}
 
-      {/* Botão Principal (Livre) */}
+      {/* Botão Principal (Treino Livre) */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity
           style={[
             styles.buttonPrimary, 
-            isFreeWorkoutOpen && styles.buttonResume 
+            isFreeWorkoutOpen ? styles.buttonResume : {} 
           ]}
           onPress={() => handleStartWorkout(undefined)}
         >
@@ -207,7 +213,7 @@ export default function Home({ navigation }: HomeProps) {
       <View style={styles.buttonContainer}>
         <TouchableOpacity
           style={styles.buttonSecondary}
-          onPress={handleHistoryPress}
+          onPress={() => navigation.navigate('WorkoutHistory', {})}
         >
           <Text style={styles.buttonTextSecondary}>Histórico de Treinos</Text>
         </TouchableOpacity>
@@ -270,119 +276,40 @@ export default function Home({ navigation }: HomeProps) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-    backgroundColor: '#fff',
-  },
-  welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 30,
-    textAlign: 'center',
-  },
-  buttonContainer: {
-    width: '100%',
-    marginVertical: 6,
-  },
-  logoutButton: {
-    width: '100%',
-    marginTop: 20,
-  },
-  buttonPrimary: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    minHeight: 50,
-    justifyContent: 'center',
-  },
-  buttonResume: {
-    backgroundColor: '#D97706',
-    borderColor: '#B45309',
-    borderWidth: 1,
-  },
-  buttonTextPrimary: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  buttonSecondary: {
-    backgroundColor: '#fff',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#007AFF',
-  },
-  buttonTextSecondary: {
-    color: '#007AFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  buttonDanger: {
-    backgroundColor: '#FF3B30',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  buttonTextDanger: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  planCard: {
-    width: '100%',
-    backgroundColor: '#F0F9FF',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#BEE3F8',
-    marginBottom: 20,
-  },
-  planTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2B6CB0',
-    marginBottom: 4,
-  },
-  planSubtitle: {
-    fontSize: 14,
-    color: '#4A5568',
-    marginBottom: 12,
-  },
-  workoutRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 8,
-    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  workoutRowActive: {
-    borderColor: '#007AFF',
-    backgroundColor: '#EBF8FF',
-  },
-  workoutIcon: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: '#EBF8FF',
-    justifyContent: 'center', alignItems: 'center', marginRight: 12
-  },
-  workoutIconActive: {
-    backgroundColor: '#007AFF',
-  },
-  workoutLetter: { fontWeight: 'bold', color: '#007AFF' },
+  container: { flexGrow: 1, alignItems: 'center', padding: 20, backgroundColor: '#fff', paddingBottom: 40 },
+  welcomeText: { fontSize: 24, fontWeight: 'bold', marginBottom: 30, textAlign: 'center', marginTop: 10 },
+  
+  buttonContainer: { width: '100%', marginVertical: 6 },
+  logoutButton: { width: '100%', marginTop: 20 },
+  
+  buttonPrimary: { backgroundColor: '#007AFF', paddingVertical: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: {width:0, height:2}, shadowOpacity:0.1, shadowRadius:4, elevation:3 },
+  buttonResume: { backgroundColor: '#D97706', borderColor: '#B45309', borderWidth: 1 },
+  buttonTextPrimary: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  
+  buttonSecondary: { backgroundColor: '#fff', paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#007AFF' },
+  buttonTextSecondary: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
+  
+  buttonDanger: { backgroundColor: '#FFF5F5', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  buttonTextDanger: { color: '#E53E3E', fontSize: 16, fontWeight: '600' },
+  
+  planCard: { width: '100%', backgroundColor: '#F0F9FF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#BEE3F8', marginBottom: 20 },
+  planTitle: { fontSize: 18, fontWeight: 'bold', color: '#2B6CB0', marginBottom: 4 },
+  planSubtitle: { fontSize: 14, color: '#4A5568', marginBottom: 12 },
+  
+  workoutRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', padding: 12, borderRadius: 12, marginBottom: 8, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1, borderWidth: 1, borderColor: '#EDF2F7' },
+  workoutRowActive: { borderColor: '#007AFF', backgroundColor: '#EBF8FF' },
+  
+  workoutIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F7FAFC', justifyContent: 'center', alignItems: 'center', marginRight: 12, borderWidth:1, borderColor: '#E2E8F0' },
+  workoutIconActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  
+  workoutLetter: { fontWeight: 'bold', color: '#007AFF', fontSize: 16 },
   workoutName: { flex: 1, fontSize: 16, fontWeight: '600', color: '#2D3748' },
   workoutNameActive: { color: '#007AFF' },
-  activeLabel: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#007AFF',
-    marginTop: 2,
-  },
-  emptyPlanText: { fontStyle: 'italic', color: '#718096', textAlign: 'center' }
+  
+  activeLabel: { fontSize: 10, fontWeight: 'bold', color: '#007AFF', marginTop: 2, letterSpacing: 0.5 },
+  
+  emptyPlanText: { fontStyle: 'italic', color: '#718096', textAlign: 'center' },
+  
+  // [UI] Botão de perfil refinado
+  profileIconBg: { backgroundColor: '#F0F9FF', padding: 10, borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0' }
 });

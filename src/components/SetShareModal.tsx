@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -6,264 +6,157 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  SafeAreaView,
   Alert,
-  Dimensions,
-  ScrollView,
+  SafeAreaView,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import ViewShot, { captureRef } from 'react-native-view-shot';
-import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
-import * as Clipboard from 'expo-clipboard';
+import * as Sharing from 'expo-sharing';
 import Slider from '@react-native-community/slider';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import ShareableCard from './ShareableCard';
-import { generateWorkoutMarkdown } from '@/utils/markdown';
+import t from '@/i18n/pt';
+import { WorkoutSet, HistoricalSet } from '@/types/workout';
+import { calculateE1RM } from '@/utils/e1rm';
+import { getDaysAgo } from '@/utils/date';
+import { fetchPreviousBestSet } from '@/services/progression.service';
+import SetShareCard from './SetShareCard';
 
-import type { WorkoutHistoryItem } from '@/types/workout';
-import type {
-  HistoricalRepPR as RepPR,
-  HistoricalWeightPR as WeightPR,
-} from '@/types/workout';
+type PRKind = 'e1rm' | 'reps' | 'none';
 
-// [CORREÇÃO] Dimensões dinâmicas baseadas na tela do usuário
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH; 
-const CARD_HEIGHT = SCREEN_HEIGHT; 
-
-interface WorkoutShareModalProps {
+interface SetShareModalProps {
   visible: boolean;
   onClose: () => void;
-  isFetchingPRs: boolean;
-  workout: WorkoutHistoryItem | null;
-  repPRs: RepPR[];
-  weightPRs: WeightPR[];
+  exerciseName: string;
+  set: WorkoutSet | null;
+  definitionId: string | null;
+  isPR: boolean;
 }
 
-export default function WorkoutShareModal({
+export default function SetShareModal({
   visible,
   onClose,
-  isFetchingPRs,
-  workout,
-  repPRs,
-  weightPRs,
-}: WorkoutShareModalProps) {
-  const viewShotRef = useRef<ViewShot | null>(null);
+  exerciseName,
+  set,
+  definitionId,
+  isPR,
+}: SetShareModalProps) {
+  const viewShotRef = useRef<ViewShot>(null);
   const [bgOpacity, setBgOpacity] = useState<number>(1);
-  const [fullScreen, setFullScreen] = useState<boolean>(false);
-  const [isSharingOrSaving, setIsSharingOrSaving] = useState(false);
+  const [previousBest, setPreviousBest] = useState<HistoricalSet | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSharingOrSaving, setIsSharingOrSaving] = useState<boolean>(false);
 
   const [permissionResponse, requestPermission] = MediaLibrary.usePermissions();
+  const insets = useSafeAreaInsets();
 
-  const ensureWorkout = () => {
-    if (!workout) {
-      Alert.alert(
-        'Aguarde',
-        'Os dados do treino ainda não estão disponíveis.'
-      );
-      return false;
+  // Carrega PR anterior quando modal abre
+  useEffect(() => {
+    if (visible && set && definitionId) {
+      setLoading(true);
+
+      const loadPrevious = async () => {
+        try {
+          if (isPR) {
+            // [CORREÇÃO] Passamos o ID da sessão atual para excluir da busca
+            // Se set.sessionWorkoutId estiver undefined, a query vai buscar tudo (o que causa o bug),
+            // mas como corrigimos o LogWorkout para passar isso, deve funcionar.
+            const data = await fetchPreviousBestSet(definitionId, set.sessionWorkoutId);
+            setPreviousBest(data);
+          } else {
+            setPreviousBest(null);
+          }
+        } catch (error: any) {
+          console.error('Erro ao buscar PR anterior:', error);
+          Alert.alert(
+            t.common.error,
+            error?.message || 'Erro ao buscar recorde anterior.'
+          );
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      loadPrevious();
+    } else if (visible) {
+      setLoading(false);
+      setPreviousBest(null);
     }
-    return true;
-  };
+  }, [visible, set, definitionId, isPR]);
+
+  const currentSetData: HistoricalSet | null = useMemo(() => {
+    if (!set) return null;
+
+    return {
+      date: new Date().toISOString(),
+      weight: set.weight,
+      reps: set.reps,
+      e1rm: calculateE1RM(set.weight, set.reps),
+    };
+  }, [set]);
+
+  const prKind: PRKind = useMemo(() => {
+    if (!isPR || !currentSetData) return 'none';
+    if (!previousBest) return 'e1rm';
+
+    const currE1 =
+      currentSetData.e1rm ??
+      calculateE1RM(currentSetData.weight, currentSetData.reps);
+    const prevE1 =
+      previousBest.e1rm ??
+      calculateE1RM(previousBest.weight, previousBest.reps);
+    const epsilon = 0.5;
+
+    if (currE1 > prevE1 + epsilon) {
+      return 'e1rm';
+    }
+
+    if (
+      currentSetData.weight === previousBest.weight &&
+      currentSetData.reps > previousBest.reps
+    ) {
+      return 'reps';
+    }
+
+    return 'none';
+  }, [isPR, currentSetData, previousBest]);
 
   const handleShare = async () => {
-    if (!ensureWorkout()) return;
+    if (!currentSetData) return;
     if (!viewShotRef.current) return;
 
     try {
       setIsSharingOrSaving(true);
-      // Exportação em alta resolução (Full HD - 1080x1920)
-      const uri = await captureRef(viewShotRef, {
-        format: 'png',
-        quality: 1.0,
-        width: 1080,  
-        height: 1920, 
-      });
-      
-      await Sharing.shareAsync(uri, {
-        mimeType: 'image/png',
-        dialogTitle: 'Compartilhar treino',
-      });
-    } catch (e: any) {
-      Alert.alert('Erro', e?.message || 'Erro desconhecido.');
+      const uri = await captureRef(viewShotRef, { format: 'png', quality: 0.9 });
+      await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Compartilhar série' });
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message);
     } finally {
       setIsSharingOrSaving(false);
     }
   };
 
   const handleSave = async () => {
-    if (!ensureWorkout()) return;
     if (!viewShotRef.current) return;
-
     try {
       setIsSharingOrSaving(true);
       if (!permissionResponse || permissionResponse.status !== 'granted') {
         const permission = await requestPermission();
         if (!permission.granted) {
-          Alert.alert('Permissão negada', 'Preciso de acesso à galeria.');
+          Alert.alert('Permissão', 'Preciso de acesso à galeria.');
           setIsSharingOrSaving(false);
           return;
         }
       }
-      const uri = await captureRef(viewShotRef, {
-        format: 'png',
-        quality: 0.9,
-        width: 1080,
-        height: 1920,
-      });
+      const uri = await captureRef(viewShotRef, { format: 'png', quality: 0.9 });
       await MediaLibrary.saveToLibraryAsync(uri);
-      Alert.alert('Sucesso', 'Imagem salva na galeria.');
-    } catch (e: any) {
-      Alert.alert('Erro', e?.message || 'Erro ao salvar imagem.');
+      Alert.alert('Sucesso', 'Salvo na galeria.');
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message);
     } finally {
       setIsSharingOrSaving(false);
     }
-  };
-
-  const handleCopyText = async () => {
-    if (!ensureWorkout()) return;
-    try {
-      const text = generateWorkoutMarkdown(workout!);
-      await Clipboard.setStringAsync(text);
-      Alert.alert('Copiado!', 'Texto copiado para a área de transferência.');
-    } catch (e) {
-      Alert.alert('Erro', 'Não foi possível copiar o texto.');
-    }
-  };
-
-  const renderContent = () => {
-    if (isFetchingPRs) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FFFFFF" />
-          <Text style={styles.loadingText}>Carregando dados do treino...</Text>
-        </View>
-      );
-    }
-
-    // Área disponível para preview (acima dos controles)
-    const availableHeight = SCREEN_HEIGHT * 0.65;
-    // Fator de escala para caber na tela sem cortar
-    const scale = Math.min(1, availableHeight / CARD_HEIGHT);
-
-    return (
-      <View style={styles.contentWrapper}>
-        {/* ÁREA DE VISUALIZAÇÃO DO CARD */}
-        <View style={{ 
-             width: CARD_WIDTH, 
-             height: CARD_HEIGHT,
-             // Escala o preview para caber na tela, mas mantém a proporção original
-             transform: [{ scale: fullScreen ? scale : 0.85 }], 
-             alignItems: 'center',
-             justifyContent: 'center',
-             // Importante: overflow visible para não cortar sombras, mas hidden se vazar muito
-             overflow: 'hidden',
-             borderRadius: fullScreen ? 0 : 20,
-          }}>
-            <ViewShot
-              ref={viewShotRef}
-              style={{ width: '100%', height: '100%' }} 
-              options={{ format: 'png', quality: 0.9 }}
-            >
-              <ShareableCard
-                workout={workout}
-                repPRs={repPRs}
-                weightPRs={weightPRs}
-                bgOpacity={bgOpacity}
-                fullScreen={fullScreen}
-              />
-            </ViewShot>
-        </View>
-
-        {/* CONTROLES FIXOS NO RODAPÉ */}
-        <View style={styles.controlsArea}>
-          
-          {/* Slider de Transparência */}
-          <View style={styles.sliderRow}>
-            <Text style={styles.sliderLabel}>Fundo:</Text>
-            <Slider
-              style={styles.slider}
-              minimumValue={0}
-              maximumValue={1}
-              value={bgOpacity}
-              onValueChange={setBgOpacity}
-              minimumTrackTintColor="#FFFFFF"
-              maximumTrackTintColor="#4A5568"
-              thumbTintColor="#FFFFFF"
-            />
-          </View>
-
-          {/* Botões de Ação */}
-          <View style={styles.scrollContainer}>
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.buttonsScrollContent}
-            >
-              <TouchableOpacity
-                style={[styles.actionButton, styles.actionButtonNeutral]}
-                onPress={() => setFullScreen((prev) => !prev)}
-              >
-                <Feather
-                  name={fullScreen ? 'minimize-2' : 'maximize-2'}
-                  size={16}
-                  color="#FFF"
-                />
-                <Text style={styles.actionButtonText}>
-                  {fullScreen ? 'Card' : 'Tela Cheia'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.actionButton, styles.actionButtonNeutral]}
-                onPress={handleCopyText}
-              >
-                <Feather name="copy" size={16} color="#FFF" />
-                <Text style={styles.actionButtonText}>Copiar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.actionButton, styles.actionButtonPrimary]}
-                onPress={handleShare}
-                disabled={isSharingOrSaving}
-              >
-                {isSharingOrSaving ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <>
-                    <Feather name="share" size={16} color="#FFF" />
-                    <Text style={styles.actionButtonText}>Enviar</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.actionButton, styles.actionButtonPrimary]}
-                onPress={handleSave}
-                disabled={isSharingOrSaving}
-              >
-                {isSharingOrSaving ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <>
-                    <Feather name="download" size={16} color="#FFF" />
-                    <Text style={styles.actionButtonText}>Baixar</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.actionButton, styles.actionButtonClose]}
-                onPress={onClose}
-              >
-                <Feather name="x" size={16} color="#333" />
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </View>
-      </View>
-    );
   };
 
   if (!visible) return null;
@@ -275,9 +168,64 @@ export default function WorkoutShareModal({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.modalContainer}>
-        {renderContent()}
-      </SafeAreaView>
+      {/* View simples para o fundo escuro */}
+      <View style={styles.modalContainer}>
+        
+        {/* Botão de Fechar no Topo Esquerdo (Com Safe Area) */}
+        <View style={[styles.topHeader, { marginTop: insets.top > 0 ? insets.top : 20 }]}>
+           <TouchableOpacity style={styles.closeButtonTop} onPress={onClose}>
+              <Feather name="x" size={24} color="#FFF" />
+           </TouchableOpacity>
+        </View>
+
+        {/* Área Central de Preview */}
+        <View style={styles.previewArea}>
+          {loading || !currentSetData ? (
+            <ActivityIndicator size="large" color="#FFFFFF" />
+          ) : (
+            <ViewShot ref={viewShotRef} options={{ format: 'png', quality: 0.9 }}>
+              <SetShareCard
+                exerciseName={exerciseName}
+                set={currentSetData}
+                previousSet={previousBest}
+                isPR={isPR}
+                getDaysAgo={getDaysAgo}
+                prKind={prKind}
+                bgOpacity={bgOpacity}
+              />
+            </ViewShot>
+          )}
+        </View>
+
+        {/* Controles no Rodapé */}
+        {!loading && (
+          <View style={styles.controlsArea}>
+            <View style={styles.sliderContainer}>
+              <Text style={styles.sliderLabel}>Transparência</Text>
+              <Slider
+                style={styles.slider}
+                minimumValue={0}
+                maximumValue={1}
+                value={bgOpacity}
+                onValueChange={setBgOpacity}
+                minimumTrackTintColor="#FFFFFF"
+                maximumTrackTintColor="#4A5568"
+                thumbTintColor="#FFFFFF"
+              />
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalButton, styles.modalButtonSecondary]} onPress={handleSave} disabled={isSharingOrSaving}>
+                <Feather name="download" size={16} color="#fff" />
+                <Text style={styles.modalButtonText}>Salvar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButton, styles.modalButtonShare]} onPress={handleShare} disabled={isSharingOrSaving}>
+                <Feather name="share" size={16} color="#fff" />
+                <Text style={styles.modalButtonText}>Enviar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </View>
     </Modal>
   );
 }
@@ -286,8 +234,23 @@ const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.95)', 
+    justifyContent: 'space-between', // Distribui Header, Content, Footer
   },
-  loadingContainer: {
+  topHeader: {
+    paddingHorizontal: 20,
+    paddingBottom: 10, 
+    alignItems: 'flex-start',
+    zIndex: 10,
+  },
+  closeButtonTop: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewArea: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
@@ -297,71 +260,51 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
   },
-  contentWrapper: {
-    flex: 1,
-    width: '100%',
-    alignItems: 'center', // [CORREÇÃO] Centraliza horizontalmente o preview
-    justifyContent: 'space-between', 
-  },
   controlsArea: {
     width: '100%',
-    paddingTop: 0,
-    paddingVertical: 0, 
-    paddingBottom: 40,
-    zIndex: 2,
-  },
-  sliderRow: {
-    flexDirection: 'row', 
-    alignItems: 'center',
     paddingHorizontal: 20,
-    marginBottom: 12, 
+    paddingBottom: 40, 
+    paddingTop: 20,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  sliderContainer: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   sliderLabel: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginRight: 12,
-    width: 50,
+    fontSize: 13,
+    marginBottom: 4,
   },
   slider: {
-    flex: 1, 
+    width: 240,
     height: 40,
   },
-  scrollContainer: {
-    height: 50,
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
   },
-  buttonsScrollContent: {
-    paddingHorizontal: 16, 
-    alignItems: 'center',
-    gap: 10, 
-  },
-  actionButton: {
+  modalButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14, 
-    paddingVertical: 2, 
-    borderRadius: 20,
-    height: 40, 
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 24,
+    minWidth: 100,
+    justifyContent: 'center',
   },
-  actionButtonNeutral: {
-    backgroundColor: 'rgba(255,255,255,0.2)', 
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+  modalButtonSecondary: {
+    backgroundColor: '#4A5568',
   },
-  actionButtonPrimary: {
+  modalButtonShare: {
     backgroundColor: '#007AFF',
   },
-  actionButtonClose: {
-    backgroundColor: '#E5E5EA',
-    width: 40, 
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 0, 
-  },
-  actionButtonText: {
-    fontSize: 13,
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
-    marginLeft: 6,
-    color: '#FFF',
+    marginLeft: 8,
   },
 });

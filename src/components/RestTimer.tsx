@@ -15,9 +15,8 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { useTimer } from '@/context/TimerContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { navigate } from '@/utils/navigationRef';
+import { navigate } from '@/utils/navigationRef'; 
 
-// [MODERNIZADO] Usando Gesture Detector (RN 0.81 Friendly)
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { 
   useSharedValue, 
@@ -25,8 +24,7 @@ import Animated, {
   withSpring, 
   withDelay,
   withTiming,
-  interpolate,
-  runOnJS
+  interpolate
 } from 'react-native-reanimated';
 
 const { width, height } = Dimensions.get('window');
@@ -43,6 +41,7 @@ const SatelliteButton = ({
   onPress, 
   onLongPress,
   children, 
+  isLocked,
   style 
 }: any) => {
   const startAngle = -90; 
@@ -79,11 +78,16 @@ const SatelliteButton = ({
   return (
     <Animated.View style={[styles.satelliteContainer, animatedStyle]}>
       <TouchableOpacity 
-        style={[styles.satelliteBtnBase, style]} 
+        style={[
+          styles.satelliteBtnBase, 
+          style,
+          isLocked && styles.satelliteLocked 
+        ]} 
         onPress={onPress}
-        onLongPress={onLongPress}
+        onLongPress={isLocked ? undefined : onLongPress} 
         delayLongPress={300}
         activeOpacity={0.8}
+        disabled={isLocked} 
       >
         {children}
       </TouchableOpacity>
@@ -105,7 +109,6 @@ export default function RestTimer() {
 
   const insets = useSafeAreaInsets();
 
-  // --- GESTURE LOGIC (Gesture API) ---
   const x = useSharedValue(MARGIN);
   const y = useSharedValue(height - insets.bottom - 150);
   
@@ -168,7 +171,17 @@ export default function RestTimer() {
     setIsMenuOpen(false);
   };
 
+  // [CORREÇÃO] Navegação para a tela de LogWorkout
+  const handleNextSet = () => {
+    stopTimer();
+    navigate('LogWorkout'); 
+  };
+
   const handleSelectPreset = (index: number) => {
+    if (!isPro && index !== 0) {
+      if (Platform.OS !== 'web') Vibration.vibrate(50);
+      return;
+    }
     selectPreset(index);
     setIsMenuOpen(false);
   };
@@ -220,8 +233,10 @@ export default function RestTimer() {
     const newPresets = [...presets, total];
     const uniqueSorted = Array.from(new Set(newPresets)).sort((a, b) => a - b);
     await updatePresets(uniqueSorted);
+    
     const newIndex = uniqueSorted.indexOf(total);
     if (newIndex !== -1) selectPreset(newIndex);
+    
     handleCancelAdd();
   };
 
@@ -239,51 +254,60 @@ export default function RestTimer() {
       key: 'stop',
       component: (
         <View style={styles.stopIconWrapper}>
-           <View style={styles.stopSquare} />
+          <View style={styles.stopSquare} />
         </View>
       ),
       onPress: handleStop,
       isStop: true,
       isSelected: false,
-      onLongPress: undefined 
+      onLongPress: undefined,
+      isLocked: false 
     });
   }
 
   presets.forEach((secs, idx) => {
     const isLocked = !isPro && idx !== 0;
     const isSelected = activePresetIndex === idx;
+    
     menuItems.push({
       key: `preset-${idx}`,
       component: (
         <>
-          <Text style={[styles.satelliteText, isSelected && { color: '#FFF', fontWeight: 'bold' }]}>
-             {formatLabel(secs)}
+          <Text style={[
+            styles.satelliteText, 
+            isSelected && { color: '#FFF', fontWeight: 'bold' },
+            isLocked && { color: '#A0AEC0' } 
+          ]}>
+            {formatLabel(secs)}
           </Text>
           {isLocked && <Feather name="lock" size={8} color="#A0AEC0" style={styles.lockIcon} />}
         </>
       ),
       onPress: () => handleSelectPreset(idx),
-      onLongPress: () => handleDeletePreset(secs),
+      onLongPress: isLocked ? undefined : () => handleDeletePreset(secs), 
       isSelected,
-      isStop: false
+      isStop: false,
+      isLocked 
     });
   });
 
   menuItems.push({
     key: 'add-btn',
     component: (
-       <View>
-         <Feather name="plus" size={20} color={isPro ? "#007AFF" : "#A0AEC0"} />
-         {!isPro && <Feather name="lock" size={8} color="#A0AEC0" style={styles.lockIcon} />}
-       </View>
+      <View>
+        <Feather name="plus" size={20} color={isPro ? "#007AFF" : "#A0AEC0"} />
+        {!isPro && <Feather name="lock" size={8} color="#A0AEC0" style={styles.lockIcon} />}
+      </View>
     ),
     onPress: handleStartAdd,
     isSelected: false,
     isStop: false,
     isAdd: true,
-    onLongPress: undefined 
+    onLongPress: undefined,
+    isLocked: !isPro
   });
 
+  // --- TELA VERMELHA DE OVERTIME ---
   if (isOvertime && !isMenuOpen && !isAddingMode) {
      return (
       <View style={[styles.alertOverlay, { paddingBottom: insets.bottom + 20 }]}>
@@ -293,7 +317,8 @@ export default function RestTimer() {
             <Text style={styles.alertTitle}>DESCANSO FINALIZADO</Text>
           </View>
           <Text style={styles.overtimeText}>{formatTime(secondsRemaining)}</Text>
-          <TouchableOpacity style={styles.alertButton} onPress={stopTimer}>
+          
+          <TouchableOpacity style={styles.alertButton} onPress={handleNextSet}>
             <Text style={styles.alertButtonText}>PRÓXIMA SÉRIE</Text>
           </TouchableOpacity>
         </View>
@@ -360,12 +385,14 @@ export default function RestTimer() {
                   isOpen={isMenuOpen}
                   onPress={item.onPress}
                   onLongPress={item.onLongPress}
+                  isLocked={item.isLocked}
                   style={[
                     styles.satelliteBtnBase,
                     item.isStop 
                       ? styles.satelliteStop 
                       : (item.isSelected ? styles.satelliteSelected : styles.satelliteNormal),
-                    item.isAdd && styles.satelliteAdd
+                    item.isAdd && styles.satelliteAdd,
+                    item.isLocked && styles.satelliteLocked
                   ]}
                 >
                   {item.component}
@@ -438,4 +465,9 @@ const styles = StyleSheet.create({
   overtimeText: { fontSize: 32, fontWeight: 'bold', color: '#FFF', marginBottom: 20, fontVariant: ['tabular-nums'] },
   alertButton: { backgroundColor: '#FFF', width: '100%', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
   alertButtonText: { color: '#D97706', fontSize: 18, fontWeight: 'bold' },
+  satelliteLocked: {
+    backgroundColor: '#F7FAFC',
+    borderColor: '#E2E8F0',
+    opacity: 0.7,
+  },
 });

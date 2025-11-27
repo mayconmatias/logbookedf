@@ -1,79 +1,100 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, AppState } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, AppState, AppStateStatus } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Feather } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
 
 interface BiometricGateProps {
   children: React.ReactNode;
-  isPro?: boolean; // Opcional: Se quiser limitar a PROs
-  sessionActive: boolean; // Só pede se tiver sessão
+  sessionActive: boolean; 
 }
+
+// Tempo de tolerância em segundos (ex: 60s) para não pedir senha se o app for minimizado rapidinho
+const GRACE_PERIOD_MS = 6000 * 1000; 
 
 export default function BiometricGate({ children, sessionActive }: BiometricGateProps) {
   const [isUnlocked, setIsUnlocked] = useState(false);
-  const [hasHardware, setHasHardware] = useState(false);
   const [isBiometricSupported, setIsBiometricSupported] = useState(false);
+  
+  // Rastreia quando o app foi para background
+  const backgroundTime = useRef<number | null>(null);
 
-  // Verifica suporte de hardware ao montar
+  // Verifica suporte ao montar
   useEffect(() => {
+    let isMounted = true;
     (async () => {
       const compatible = await LocalAuthentication.hasHardwareAsync();
-      setHasHardware(compatible);
-      
       const enrolled = await LocalAuthentication.isEnrolledAsync();
-      setIsBiometricSupported(compatible && enrolled);
       
-      // Se não tiver biometria configurada ou não tiver sessão, libera direto
-      if (!sessionActive || (!compatible || !enrolled)) {
-        setIsUnlocked(true);
+      if (isMounted) {
+        const supported = compatible && enrolled;
+        setIsBiometricSupported(supported);
+        
+        // Se não tiver sessão ou não tiver hardware, libera
+        if (!sessionActive || !supported) {
+          setIsUnlocked(true);
+        }
       }
     })();
+    return () => { isMounted = false; };
   }, [sessionActive]);
 
-  // Função de Autenticar
   const authenticate = useCallback(async () => {
     if (!isBiometricSupported) return;
 
     try {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Desbloquear Logbook',
-        fallbackLabel: 'Usar Senha do Celular',
-        disableDeviceFallback: false, // Permite senha do celular se falhar
+        fallbackLabel: 'Usar Senha',
+        disableDeviceFallback: false,
       });
 
       if (result.success) {
         setIsUnlocked(true);
+        backgroundTime.current = null; // Reseta o timer
       }
     } catch (error) {
       console.log('Erro biometria:', error);
     }
   }, [isBiometricSupported]);
 
-  // Tenta autenticar assim que identifica suporte + sessão
+  // Monitora o estado do App (Background/Active)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (!sessionActive) return;
+
+      if (nextAppState === 'background') {
+        // App foi minimizado, marca o tempo
+        backgroundTime.current = Date.now();
+      } 
+      else if (nextAppState === 'active') {
+        // App voltou
+        if (!backgroundTime.current) return; // Primeira abertura ou já estava ativo
+
+        const timeDiff = Date.now() - backgroundTime.current;
+        
+        // Se passou mais tempo que o permitido, bloqueia
+        if (timeDiff > GRACE_PERIOD_MS) {
+          setIsUnlocked(false);
+          authenticate();
+        } else {
+          // Se foi rápido, mantemos desbloqueado (se já estava)
+          // Não faz nada
+        }
+      }
+    });
+
+    return () => subscription.remove();
+  }, [sessionActive, authenticate]);
+
+  // Gatilho inicial
   useEffect(() => {
     if (sessionActive && isBiometricSupported && !isUnlocked) {
       authenticate();
     }
-  }, [sessionActive, isBiometricSupported, isUnlocked]);
+  }, [sessionActive, isBiometricSupported, isUnlocked, authenticate]);
 
-  // Opcional: Bloquear novamente se o app for para background
-  // Remova este useEffect se quiser que desbloqueie apenas 1 vez por "boot" do app
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (nextAppState === 'background' && sessionActive) {
-        setIsUnlocked(false);
-      }
-      if (nextAppState === 'active' && sessionActive && !isUnlocked) {
-        authenticate();
-      }
-    });
-    return () => subscription.remove();
-  }, [sessionActive, isUnlocked]);
-
-
-  // SE ESTIVER DESBLOQUEADO (ou não precisar), RENDERIZA O APP
-  if (isUnlocked) {
+  // Se estiver liberado ou não houver sessão, renderiza o app
+  if (isUnlocked || !sessionActive) {
     return <>{children}</>;
   }
 
@@ -84,11 +105,11 @@ export default function BiometricGate({ children, sessionActive }: BiometricGate
         <Feather name="lock" size={64} color="#007AFF" />
       </View>
       <Text style={styles.title}>Logbook Bloqueado</Text>
-      <Text style={styles.subtitle}>Use sua biometria para acessar seus treinos.</Text>
+      <Text style={styles.subtitle}>Sua sessão está protegida.</Text>
 
       <TouchableOpacity style={styles.button} onPress={authenticate}>
-        <Feather name="smile" size={24} color="#FFF" style={{marginRight: 10}} />
-        <Text style={styles.buttonText}>Autenticar</Text>
+        <Feather name="shield" size={24} color="#FFF" style={{marginRight: 10}} />
+        <Text style={styles.buttonText}>Desbloquear</Text>
       </TouchableOpacity>
     </View>
   );

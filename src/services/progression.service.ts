@@ -4,22 +4,12 @@ import {
   ExerciseAnalyticsData,
   ChartDataPoint,
   HistoricalSet,
-  CalendarDay,
 } from '@/types/analytics';
 
 import { calculateE1RM } from '@/utils/e1rm';
 
-/**
- * Define o tipo de retorno para os dados de progressão do "Tijolo & Pilha".
- */
 type ProgressionChartData = ChartDataPoint[];
 
-/**
- * ========================================================================
- * FUNÇÃO PARA O ProgressionShareModal (Gráfico "Tijolo & Pilha")
- * [ATUALIZADO] Usa 'definitionId'
- * ========================================================================
- */
 export const getProgressionData = async (
   definitionId: string
 ): Promise<ProgressionChartData> => {
@@ -28,8 +18,6 @@ export const getProgressionData = async (
   }
 
   try {
-    // Assumindo que a RPC 'get_accumulated_volume' foi atualizada
-    // para aceitar 'p_definition_id' e fazer o JOIN e.definition_id
     const { data, error } = await supabase.rpc('get_accumulated_volume', {
       p_definition_id: definitionId,
     });
@@ -49,12 +37,12 @@ export const getProgressionData = async (
 /**
  * ========================================================================
  * FUNÇÃO PARA O SetShareModal (Card "Antes e Depois")
- * [ATUALIZADO] Esta query agora é complexa e precisa de JOINs
+ * [ATUALIZADO] Agora aceita excludeWorkoutId para não pegar o PR atual como "Anterior"
  * ========================================================================
  */
-
 export const fetchPreviousBestSet = async (
-  definitionId: string
+  definitionId: string,
+  excludeWorkoutId?: string // <--- Parâmetro Novo
 ): Promise<HistoricalSet | null> => {
   if (!definitionId) {
     throw new Error('ID da definição é necessário para buscar PR anterior.');
@@ -65,14 +53,15 @@ export const fetchPreviousBestSet = async (
     if (userError) throw userError;
     if (!userResponse.user) throw new Error('Usuário não autenticado.');
 
-    // Buscamos TODAS as séries daquele exercício para aquele usuário
-    const { data, error } = await supabase
+    // Query Base
+    let query = supabase
       .from('sets')
       .select(`
         weight,
         reps,
         exercise:exercises!inner(
           definition_id,
+          workout_id,
           workout:workouts!inner(
             workout_date,
             user_id
@@ -81,6 +70,13 @@ export const fetchPreviousBestSet = async (
       `)
       .eq('exercise.definition_id', definitionId)
       .eq('exercise.workout.user_id', userResponse.user.id);
+
+    // [CORREÇÃO] Se tivermos o ID da sessão atual, excluímos ela da busca
+    if (excludeWorkoutId) {
+      query = query.neq('exercise.workout_id', excludeWorkoutId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('Erro ao buscar PR anterior:', error);
@@ -98,12 +94,12 @@ export const fetchPreviousBestSet = async (
       const weight = Number(row.weight) || 0;
       const reps = Number(row.reps) || 0;
 
-      // se tiver algo bizarro, ignora
       if (weight <= 0 || reps <= 0) continue;
 
       const e1rm = calculateE1RM(weight, reps);
       const workoutDate = row.exercise?.workout?.workout_date ?? null;
 
+      // Atualiza se for melhor
       if (!best || e1rm > (best.e1rm ?? 0)) {
         best = {
           date: workoutDate,
@@ -122,19 +118,9 @@ export const fetchPreviousBestSet = async (
 };
 
 
-/**
- * ========================================================================
- * FUNÇÃO PARA O ExerciseAnalyticsSheet (Redesenho Atual)
- * [ATUALIZADO] Usa 'definitionId'
- * ========================================================================
- */
-/**
- * Busca dados analíticos. 
- * [ATUALIZADO] Aceita studentId opcional para o modo Coach.
- */
 export const fetchExerciseAnalytics = async (
   definitionId: string,
-  studentId?: string // <--- Parâmetro Novo
+  studentId?: string
 ): Promise<ExerciseAnalyticsData> => {
   if (!definitionId) {
     throw new Error('ID da Definição é necessário.');
@@ -143,7 +129,7 @@ export const fetchExerciseAnalytics = async (
   try {
     const { data, error } = await supabase.rpc('get_exercise_analytics', {
       p_definition_id: definitionId,
-      p_target_user_id: studentId || null // <--- Passa para o SQL
+      p_target_user_id: studentId || null
     });
 
     if (error) {
@@ -154,7 +140,6 @@ export const fetchExerciseAnalytics = async (
     return data as ExerciseAnalyticsData;
   } catch (err) {
     console.error('Erro fetchExerciseAnalytics:', err);
-    // Retorno fallback vazio
     return {
       prStreakCount: 0,
       daysSinceLastPR: 0,

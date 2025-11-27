@@ -15,7 +15,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Linking,
+  Keyboard
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage'; 
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useDebounce } from 'use-debounce';
 import * as Haptics from 'expo-haptics';
@@ -28,6 +30,7 @@ import t from '@/i18n/pt';
 import type { RootStackParamList } from '@/types/navigation';
 import { WorkoutExercise, WorkoutSet } from '@/types/workout';
 import { PlannedExercise } from '@/types/coaching';
+import { CurrentBestSet } from '@/types/analytics'; // [NOVO] Import do tipo
 import { fetchPlannedExercises } from '@/services/workout_planning.service';
 
 import WorkoutForm, { WorkoutFormProps } from '@/components/WorkoutForm';
@@ -57,9 +60,10 @@ import { fetchAndGroupWorkoutData } from '@/services/workouts.service';
 import { calculateE1RM, LBS_TO_KG_FACTOR } from '@/utils/e1rm';
 import { classifyPR } from '@/services/records.service';
 
+const DRAFT_KEY = '@log_workout_draft';
+
 type Props = NativeStackScreenProps<RootStackParamList, 'LogWorkout'>;
 
-// [CORREÇÃO] Mantemos apenas este export default
 export default function LogWorkoutScreen({ navigation, route }: Props) {
   const { workoutId: paramWorkoutId, templateId: paramTemplateId } = route.params || {};
   const { startTimer } = useTimer();
@@ -104,6 +108,7 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
   const [definitionIdToShare, setDefinitionIdToShare] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [inputUnit, setInputUnit] = useState<'kg' | 'lbs'>('kg');
+  
   const [exerciseName, setExerciseName] = useState('');
   const [currentDefinitionId, setCurrentDefinitionId] = useState<string | null>(null);
   const [weight, setWeight] = useState('');
@@ -114,8 +119,8 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
   const [isUnilateral, setIsUnilateral] = useState(false);
   const [side, setSide] = useState<'E' | 'D' | null>(null);
   const [isAutocompleteFocused, setIsAutocompleteFocused] = useState(false);
+  
   const [prSetIds, setPrSetIds] = useState<Set<string>>(new Set());
-
   const [prescriptions, setPrescriptions] = useState<Record<string, PlannedExercise>>({});
   const [loadingPrescription, setLoadingPrescription] = useState(false);
   
@@ -123,9 +128,80 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
   const [isReordering, setIsReordering] = useState(false);
 
   const currentPlan = currentDefinitionId ? prescriptions[currentDefinitionId] : null;
-  
   const analyticsSheetRef = useRef<ExerciseAnalyticsSheetRef>(null);
   const [debouncedExerciseName] = useDebounce(exerciseName, 500);
+
+  // --- [NOVO] Helper para encontrar a melhor série da sessão atual ---
+  const getBestSetForDefinition = useCallback((defId: string): CurrentBestSet | null => {
+    const exercise = groupedWorkout.find(ex => ex.definition_id === defId);
+    if (!exercise || !exercise.sets || exercise.sets.length === 0) return null;
+
+    let best: CurrentBestSet | null = null;
+    let maxE1RM = -1;
+
+    exercise.sets.forEach(set => {
+      // Ignora ghost sets
+      if (set.weight > 0 && set.reps > 0) {
+        const val = calculateE1RM(set.weight, set.reps);
+        if (val > maxE1RM) {
+          maxE1RM = val;
+          best = {
+            weight: set.weight,
+            reps: set.reps,
+            e1rm: val,
+            definitionId: defId
+          };
+        }
+      }
+    });
+    return best;
+  }, [groupedWorkout]);
+
+  // --- RESTAURAR DRAFT ---
+  useEffect(() => {
+    const restoreDraft = async () => {
+      if (!sessionWorkoutId || loading) return; 
+      try {
+        const draftJson = await AsyncStorage.getItem(DRAFT_KEY);
+        if (draftJson) {
+          const draft = JSON.parse(draftJson);
+          if (draft.sessionId === sessionWorkoutId) {
+             setExerciseName(draft.exerciseName || '');
+             setWeight(draft.weight || '');
+             setReps(draft.reps || '');
+             setRpe(draft.rpe || '');
+             setObservations(draft.observations || '');
+             if (draft.definitionId) {
+                setCurrentDefinitionId(draft.definitionId);
+                fetchQuickStats(draft.definitionId);
+             }
+          } else {
+            AsyncStorage.removeItem(DRAFT_KEY);
+          }
+        }
+      } catch (e) { console.log('Erro draft load', e); }
+    };
+    restoreDraft();
+  }, [sessionWorkoutId, loading, fetchQuickStats]);
+
+  // --- SALVAR DRAFT AO DIGITAR ---
+  useEffect(() => {
+    if (!sessionWorkoutId) return;
+    const saveDraft = async () => {
+      const draft = {
+        sessionId: sessionWorkoutId,
+        exerciseName,
+        definitionId: currentDefinitionId,
+        weight,
+        reps,
+        rpe,
+        observations
+      };
+      await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    };
+    const timeout = setTimeout(saveDraft, 1000);
+    return () => clearTimeout(timeout);
+  }, [sessionWorkoutId, exerciseName, currentDefinitionId, weight, reps, rpe, observations]);
 
   const handleCleanup = useCallback(() => {
     if (!paramWorkoutId) {
@@ -157,10 +233,8 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
           
           for (const plan of plannedExercises) {
             const exInstanceId = await getOrCreateExerciseInWorkout(sessionWorkoutId, plan.definition_id);
-            
             prescrMap[plan.definition_id] = plan;
             const targetSets = plan.sets_count || 3;
-            
             for (let i = 1; i <= targetSets; i++) {
               await saveSet({
                 exercise_id: exInstanceId,
@@ -202,7 +276,6 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
         }
       }
     } else {
-      // Se o usuário limpar o campo, reseta o ID
       if (!exerciseName && currentDefinitionId !== null) {
         setCurrentDefinitionId(null);
         clearPeek();
@@ -220,7 +293,6 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
     }
     const rawWeight = parseFloat(weight);
     const repsNum = parseInt(reps, 10);
-    
     if (isNaN(rawWeight) || isNaN(repsNum) || repsNum <= 0) return;
     
     let weightInKg = inputUnit === 'lbs' ? rawWeight * LBS_TO_KG_FACTOR : rawWeight;
@@ -244,17 +316,13 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
 
   const handleEditSet = useCallback((set: WorkoutSet, autoFillWeight?: string) => {
     setExerciseName(groupedWorkout.find(ex => ex.id === set.exercise_id)?.name || '');
-    
     const weightToUse = autoFillWeight !== undefined ? autoFillWeight : (set.weight === null ? '' : set.weight.toString());
     setWeight(weightToUse);
-    
     setReps(set.reps === 0 ? '' : set.reps.toString());
     setRpe(set.rpe ? set.rpe.toString() : '');
     setObservations(set.observations || '');
-    
     if (set.side) { setIsUnilateral(true); setSide(set.side); } else { setIsUnilateral(false); setSide(null); }
     setEditingSetId(set.id);
-    
     const ex = groupedWorkout.find(e => e.id === set.exercise_id);
     if (ex) {
       setCurrentDefinitionId(ex.definition_id);
@@ -264,26 +332,20 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
 
   const handleCancelEdit = () => {
     setEditingSetId(null);
-    setWeight(''); setReps(''); setRpe(''); setObservations(''); setSide(null);
+    // Não limpa campos ao cancelar edição, apenas sai do modo
   };
 
   const handlePopulateForm = useCallback((name: string, defId: string) => {
     setExerciseName(name);
     setCurrentDefinitionId(defId);
     fetchQuickStats(defId);
-    
-    setWeight(''); 
-    setReps(''); 
-    setRpe(''); 
-    setObservations(''); 
-    setSide(null); 
-    setEditingSetId(null); 
-
+    setWeight(''); setReps(''); setRpe(''); setObservations(''); setSide(null); setEditingSetId(null); 
     Haptics.selectionAsync();
   }, [fetchQuickStats]);
   
-  const handleClearForm = useCallback(() => {
+  const handleClearForm = useCallback(async () => {
     setExerciseName(''); setCurrentDefinitionId(null); setWeight(''); setReps(''); setRpe(''); setObservations(''); setSide(null); setEditingSetId(null); clearPeek();
+    await AsyncStorage.removeItem(DRAFT_KEY);
   }, [clearPeek]);
 
   const handleShareSet = useCallback((set: WorkoutSet, isPR: boolean, exName: string, defId: string) => {
@@ -304,7 +366,21 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
     Alert.alert('Instruções do Treino', `${metaText}\n\n📝 ${notes}${video ? '\n\n🎥 Há um vídeo disponível.' : ''}`, [{ text: 'Fechar', style: 'cancel' }, video ? { text: 'Ver Vídeo', onPress: () => Linking.openURL(video) } : { text: 'OK' }]);
   }, [currentDefinitionId, prescriptions]);
 
+  const handleFinishWorkout = useCallback(async () => {
+    setSaving(true);
+    try {
+      await finishWorkout(); 
+      await AsyncStorage.removeItem(DRAFT_KEY); 
+      navigation.replace('WorkoutHistory', { highlightWorkoutId: sessionWorkoutId || paramWorkoutId });
+    } catch (e: any) {
+      Alert.alert('Erro', e.message);
+    } finally {
+      setSaving(false);
+    }
+  }, [navigation, sessionWorkoutId, paramWorkoutId, finishWorkout]);
+
   const handleSaveAndRest = async () => {
+    Keyboard.dismiss();
     if (!exerciseName || weight === '' || !reps || !sessionWorkoutId) {
       Alert.alert(t.common.attention, t.logWorkout.formValidation);
       return;
@@ -313,38 +389,30 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
       Alert.alert(t.common.attention, t.logWorkout.unilateralValidation);
       return;
     }
-
     await handleSaveSet(); 
-    
     const plannedRest = currentDefinitionId ? prescriptions[currentDefinitionId]?.rest_seconds : undefined;
     startTimer(plannedRest || undefined); 
   };
 
   const handleSaveSet = useCallback(async () => {
     if (loadingStats) return;
-    
     if (!exerciseName || weight === '' || !reps || !sessionWorkoutId) {
       return Alert.alert(t.common.attention, t.logWorkout.formValidation);
     }
     if (isUnilateral && !side) {
       return Alert.alert(t.common.attention, t.logWorkout.unilateralValidation);
     }
-
     setSaving(true);
     let definitionId = currentDefinitionId;
-
     try {
-      // --- FIX PARA O BUG DE EXERCÍCIO ERRADO ---
       if (definitionId) {
         const currentDefInCatalog = allExerciseDefinitions.find(ex => ex.exercise_id === definitionId);
         if (currentDefInCatalog && currentDefInCatalog.exercise_name_lowercase !== exerciseName.trim().toLowerCase()) {
            definitionId = null; 
         }
       }
-      
       if (!definitionId) {
         const existingDef = allExerciseDefinitions.find(ex => ex.exercise_name_lowercase === exerciseName.trim().toLowerCase());
-        
         if (existingDef) {
           definitionId = existingDef.exercise_id;
         } else {
@@ -354,14 +422,12 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
         }
         setCurrentDefinitionId(definitionId);
       }
-
       if (!definitionId) throw new Error('ID de definição não encontrado.');
 
       const exerciseInstanceId = await getOrCreateExerciseInWorkout(sessionWorkoutId, definitionId);
-      
       const rawWeight = parseFloat(weight);
       if (isNaN(rawWeight)) throw new Error('Peso inválido.');
-
+      
       let weightInKg = inputUnit === 'lbs' ? rawWeight * LBS_TO_KG_FACTOR : rawWeight;
       weightInKg = Math.round(weightInKg * 100) / 100;
 
@@ -386,12 +452,7 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
         });
       }
 
-      const pr = classifyPR(
-        savedSet.weight, 
-        savedSet.reps, 
-        exerciseStats
-      );
-
+      const pr = classifyPR(savedSet.weight, savedSet.reps, exerciseStats);
       if (pr.isPR) {
         setPrSetIds((prev) => new Set(prev).add(savedSet.id));
         invalidateCache(definitionId);
@@ -400,14 +461,13 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
 
       const updatedData = await fetchAndGroupWorkoutData(sessionWorkoutId);
       setGroupedWorkout(updatedData);
+      AsyncStorage.removeItem(DRAFT_KEY);
 
       const plan = prescriptions[definitionId];
       const targetSets = plan?.sets_count || 0;
-      
       if (targetSets > 0 && savedSet.set_number === targetSets) {
         const currentExIndex = updatedData.findIndex(ex => ex.id === exerciseInstanceId);
         const nextExercise = updatedData[currentExIndex + 1];
-        
         if (nextExercise) {
           Alert.alert(
             'Exercício Concluído! 🎉',
@@ -422,26 +482,36 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
           );
           return;
         } else {
-           Alert.alert('Treino Concluído! 🏆', 'Todos os exercícios finalizados.', [{ text: 'Continuar', style: 'cancel' }, { text: 'Finalizar', onPress: handleFinishWorkout }]);
+           Alert.alert('Treino Concluído! 🏆', 'Todos os exercícios finalizados.', [
+             { text: 'Continuar', style: 'cancel' }, 
+             { text: 'Finalizar', onPress: handleFinishWorkout }
+           ]);
           return;
         }
       }
 
       const exerciseUpdated = updatedData.find(ex => ex.id === exerciseInstanceId);
       if (editingSetId && exerciseUpdated) {
-        const nextSet = exerciseUpdated.sets.find(s => s.set_number === savedSet.set_number + 1);
-        if (nextSet && nextSet.weight === 0 && nextSet.reps === 0) handleEditSet(nextSet, weight); 
-        else handleCancelEdit();
+        setEditingSetId(null);
       } else {
         setReps(''); setRpe(''); setObservations(baseObservation);
+        const nextDraft = {
+          sessionId: sessionWorkoutId,
+          exerciseName,
+          definitionId,
+          weight,
+          reps: '',
+          rpe: '',
+          observations: baseObservation
+        };
+        AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(nextDraft));
       }
-
     } catch (e: any) { 
       Alert.alert(t.common.error, e.message); 
     } finally { 
       setSaving(false); 
     }
-  }, [sessionWorkoutId, exerciseName, weight, reps, rpe, observations, inputUnit, isUnilateral, side, groupedWorkout, exerciseStats, loadingStats, baseObservation, setGroupedWorkout, setPrSetIds, currentDefinitionId, handleCreateDefinition, invalidateCache, editingSetId, prescriptions, handleCancelEdit, handleEditSet, handlePopulateForm, allExerciseDefinitions]);
+  }, [sessionWorkoutId, exerciseName, weight, reps, rpe, observations, inputUnit, isUnilateral, side, groupedWorkout, exerciseStats, loadingStats, baseObservation, setGroupedWorkout, setPrSetIds, currentDefinitionId, handleCreateDefinition, invalidateCache, editingSetId, prescriptions, handleCancelEdit, handleEditSet, handlePopulateForm, allExerciseDefinitions, handleFinishWorkout]);
 
   const handleDeleteSet = useCallback(async (setId: string, exerciseId: string, definitionId: string) => {
     try {
@@ -459,18 +529,18 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
       } catch (e: any) { Alert.alert('Erro', e.message); }
   }, [setGroupedWorkout]);
 
+  // [CORREÇÃO] Passando o currentBest para o modal do form
   const handleShowFormAnalytics = useCallback(() => {
     if (!currentDefinitionId) return;
-    analyticsSheetRef.current?.openSheet(currentDefinitionId, exerciseName, null);
-  }, [currentDefinitionId, exerciseName]);
+    const currentBest = getBestSetForDefinition(currentDefinitionId);
+    analyticsSheetRef.current?.openSheet(currentDefinitionId, exerciseName, currentBest);
+  }, [currentDefinitionId, exerciseName, getBestSetForDefinition]);
 
+  // [CORREÇÃO] Passando o currentBest para o modal do card
   const handleShowLogAnalytics = useCallback((definitionId: string, name: string) => {
-    analyticsSheetRef.current?.openSheet(definitionId, name);
-  }, []);
-
-  const handleFinishWorkout = () => {
-    navigation.replace('WorkoutHistory', { highlightWorkoutId: sessionWorkoutId || paramWorkoutId });
-  };
+    const currentBest = getBestSetForDefinition(definitionId);
+    analyticsSheetRef.current?.openSheet(definitionId, name, currentBest);
+  }, [getBestSetForDefinition]);
 
   const onDragEnd = async ({ data }: { data: WorkoutExercise[] }) => {
     setGroupedWorkout(data);
@@ -501,11 +571,15 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
         }
       });
       if (bestSet.weight > 0) {
-        return `Melhor série: ${bestSet.weight} kg pra ${bestSet.reps} reps (e1RM ${bestSet.e1rm.toFixed(0)} kg)`;
+        const displayWeight = inputUnit === 'lbs' ? (bestSet.weight / LBS_TO_KG_FACTOR).toFixed(0) : bestSet.weight;
+        const unitLabel = inputUnit === 'lbs' ? 'lbs' : 'kg';
+        const e1rmLabel = inputUnit === 'lbs' ? (bestSet.e1rm / LBS_TO_KG_FACTOR).toFixed(0) : bestSet.e1rm.toFixed(0);
+
+        return `Melhor série: ${displayWeight} ${unitLabel} pra ${bestSet.reps} reps (e1RM ${e1rmLabel} ${unitLabel})`;
       }
     }
     return '';
-  }, [currentPlan, exerciseStats]);
+  }, [currentPlan, exerciseStats, inputUnit]);
 
   if (loading) return <View style={styles.loadingContainer}><ActivityIndicator size="large" /></View>;
 
@@ -551,7 +625,7 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
         keyExtractor={(item) => item.id}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.listContentContainer}
-        onScrollBeginDrag={() => setIsAutocompleteFocused(false)}
+        onScrollBeginDrag={() => { setIsAutocompleteFocused(false); Keyboard.dismiss(); }}
         ListHeaderComponent={
           <>
             <WorkoutForm {...workoutFormProps} />

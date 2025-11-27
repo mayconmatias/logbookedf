@@ -12,7 +12,6 @@ import { registerRootComponent } from 'expo';
 import { TimerProvider } from '@/context/TimerContext';
 import RestTimer from '@/components/RestTimer';
 import * as Notifications from 'expo-notifications';
-
 import BiometricGate from '@/components/BiometricGate';
 
 import { useFonts } from 'expo-font';
@@ -20,6 +19,9 @@ import { Feather } from '@expo/vector-icons';
 
 import { supabase } from "@/lib/supabaseClient";
 import type { RootStackParamList } from "@/types/navigation";
+
+// [CORREÇÃO] Importante para o Timer navegar
+import { navigationRef } from "@/utils/navigationRef";
 
 import LoginCPF from "@/screens/LoginCPF";
 import Signup from "@/screens/Signup"; 
@@ -42,7 +44,6 @@ import CoachPaywallScreen from '@/screens/CoachPaywallScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// [CORREÇÃO CRÍTICA] Adicionado o esquema nativo explícito 'logbookedf://'
 const linking = {
   prefixes: ['logbookedf://', Linking.createURL('/')],
   config: {
@@ -52,16 +53,19 @@ const linking = {
   },
 };
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    priority: Notifications.AndroidNotificationPriority.HIGH,
-  }),
-});
+// Safe Mode Notifications
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      priority: Notifications.AndroidNotificationPriority.HIGH,
+    }),
+  });
+} catch (e) {}
 
 export default function App() {
   const [loading, setLoading] = useState(true);
@@ -74,9 +78,13 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const { status } = await Notifications.getPermissionsAsync();
-      if (status !== 'granted') {
-        await Notifications.requestPermissionsAsync();
+      try {
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status !== 'granted') {
+          await Notifications.requestPermissionsAsync();
+        }
+      } catch (e) {
+        console.log("Notification permissions skipped (Expo Go)");
       }
     })();
   }, []);
@@ -125,7 +133,8 @@ export default function App() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <TimerProvider>
           <BiometricGate sessionActive={!!session}>
-            <NavigationContainer linking={linking}>
+            {/* [CORREÇÃO] navigationRef injetada aqui */}
+            <NavigationContainer linking={linking} ref={navigationRef}>
               {session ? (
                  isPasswordRecovery ? (
                     <Stack.Navigator>

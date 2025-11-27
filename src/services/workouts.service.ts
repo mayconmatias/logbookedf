@@ -7,6 +7,8 @@ const SESSION_KEY = '@sessionWorkoutId';
 
 /**
  * Busca ou cria uma sessão para HOJE.
+ * [ATUALIZADO] Agora considera apenas sessões ABERTAS (ended_at IS NULL).
+ * Se já houver um treino finalizado hoje, ele cria um NOVO.
  */
 export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<string> => {
   const today = getLocalYYYYMMDD();
@@ -19,7 +21,6 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
   let plannedColumn = null;
 
   if (originId) {
-    // Verifica se é um ID de Treino Planejado (Coach)
     const { data: isPlanned } = await supabase
       .from('planned_workouts')
       .select('id')
@@ -33,12 +34,13 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
     }
   }
 
-  // 2. Busca se já existe sessão HOJE (pega a última criada)
+  // 2. Busca se já existe sessão ABERTA HOJE
   let query = supabase
     .from('workouts')
     .select('id')
     .eq('user_id', user.id)
-    .eq('workout_date', today);
+    .eq('workout_date', today)
+    .is('ended_at', null); // [IMPORTANTE] Só pega se NÃO estiver finalizado
 
   if (plannedColumn) {
     query = query.eq('planned_workout_id', plannedColumn);
@@ -49,8 +51,6 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
     query = query.is('template_id', null).is('planned_workout_id', null);
   }
 
-  // [CORREÇÃO CRÍTICA] order desc + limit(1) + maybeSingle
-  // Isso impede o erro se houver mais de 1 sessão no dia.
   const { data: existingWorkout, error: findError } = await query
     .order('created_at', { ascending: false })
     .limit(1)
@@ -63,7 +63,7 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
     return existingWorkout.id;
   }
 
-  // 3. Cria novo se não achou
+  // 3. Cria novo se não achou sessão ABERTA
   const { data: newWorkout, error: createError } = await supabase
     .from('workouts')
     .insert({
@@ -71,6 +71,7 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
       workout_date: today,
       template_id: templateColumn,
       planned_workout_id: plannedColumn,
+      // ended_at começa nulo por padrão
     })
     .select('id')
     .single();
@@ -99,22 +100,38 @@ export const fetchAndGroupWorkoutData = async (
   return exercises;
 };
 
+/**
+ * [ATUALIZADO] Finaliza a sessão marcando ended_at.
+ */
 export const finishWorkoutSession = async (
   sessionWorkoutId: string,
   hasSavedSets: boolean
 ): Promise<void> => {
   await AsyncStorage.removeItem(SESSION_KEY);
 
-  if (!hasSavedSets && sessionWorkoutId) {
+  if (!sessionWorkoutId) return;
+
+  if (!hasSavedSets) {
+    // Se não tem séries, deleta o treino lixo
     try {
       await supabase.from('workouts').delete().eq('id', sessionWorkoutId);
     } catch (e: any) {
       console.error('Erro ao deletar sessão vazia:', e.message);
     }
+  } else {
+    // [IMPORTANTE] Se tem séries, marca como FINALIZADO
+    try {
+      await supabase
+        .from('workouts')
+        .update({ ended_at: new Date().toISOString() })
+        .eq('id', sessionWorkoutId);
+    } catch (e: any) {
+      console.error('Erro ao finalizar sessão:', e.message);
+    }
   }
 };
 
-// [CORREÇÃO] Reimplementada com segurança contra duplicatas
+// [ATUALIZADO] Busca apenas sessão ABERTA para a Home
 export const fetchCurrentOpenSession = async () => {
   const today = getLocalYYYYMMDD();
   
@@ -126,7 +143,7 @@ export const fetchCurrentOpenSession = async () => {
     .select('id, template_id, planned_workout_id') 
     .eq('user_id', user.id)
     .eq('workout_date', today)
-    // Pega o treino criado por último
+    .is('ended_at', null) // [IMPORTANTE] Ignora os finalizados
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();

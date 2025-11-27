@@ -6,12 +6,12 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   Dimensions,
   ScrollView,
+  Alert,
 } from 'react-native';
-// [CORREÇÃO] Import correto da SafeAreaView
-import { SafeAreaView } from 'react-native-safe-area-context';
+// [CORREÇÃO] Usar o hook de insets para controle manual
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import ViewShot, { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
@@ -53,6 +53,9 @@ export default function WorkoutShareModal({
   const [isSharingOrSaving, setIsSharingOrSaving] = useState(false);
 
   const [permissionResponse, requestPermission] = MediaLibrary.usePermissions();
+  
+  // [CORREÇÃO] Pega as medidas seguras da tela (Notch/Ilha)
+  const insets = useSafeAreaInsets();
 
   const ensureWorkout = () => {
     if (!workout) {
@@ -141,7 +144,18 @@ export default function WorkoutShareModal({
 
     return (
       <View style={styles.contentWrapper}>
-        {/* ÁREA DE VISUALIZAÇÃO FIXA */}
+        
+        {/* [CORREÇÃO] Aplicando marginTop dinâmico baseado no inset do topo */}
+        <View style={[styles.topHeader, { marginTop: insets.top > 0 ? insets.top : 20 }]}>
+          <TouchableOpacity
+            style={styles.closeButtonTop}
+            onPress={onClose}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Feather name="x" size={24} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.previewArea}>
           <ViewShot
             ref={viewShotRef}
@@ -158,7 +172,6 @@ export default function WorkoutShareModal({
           </ViewShot>
         </View>
 
-        {/* ÁREA DE CONTROLES FIXA */}
         <View style={styles.controlsArea}>
           <View style={styles.sliderRow}>
             <Text style={styles.sliderLabel}>Fundo:</Text>
@@ -231,13 +244,6 @@ export default function WorkoutShareModal({
                   </>
                 )}
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.actionButton, styles.actionButtonClose]}
-                onPress={onClose}
-              >
-                <Feather name="x" size={16} color="#333" />
-              </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
@@ -254,10 +260,10 @@ export default function WorkoutShareModal({
       animationType="fade"
       onRequestClose={onClose}
     >
-      {/* [CORREÇÃO] Usando SafeAreaView da lib correta e aplicando estilo de flex:1 e cor transparente */}
-      <SafeAreaView style={styles.modalContainer}>
+      {/* [CORREÇÃO] Trocado SafeAreaView por View comum para evitar conflitos de padding automático */}
+      <View style={styles.modalContainer}>
         {renderContent()}
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -265,7 +271,7 @@ export default function WorkoutShareModal({
 const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.9)',
+    backgroundColor: 'rgba(0,0,0,0.95)', 
   },
   loadingContainer: {
     flex: 1,
@@ -281,6 +287,22 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
   },
+  topHeader: {
+    width: '100%',
+    paddingHorizontal: 16,
+    // Padding vertical reduzido pois o marginTop já cuida do safe area
+    paddingVertical: 0, 
+    alignItems: 'flex-start',
+    zIndex: 10,
+  },
+  closeButtonTop: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   previewArea: {
     flex: 1,
     justifyContent: 'center',
@@ -295,7 +317,7 @@ const styles = StyleSheet.create({
   },
   controlsArea: {
     paddingHorizontal: 16,
-    paddingBottom: 20,
+    paddingBottom: 40, // Aumentado para garantir toque no iPhone X+
     paddingTop: 10,
     backgroundColor: 'rgba(0,0,0,0.3)',
   },
@@ -321,6 +343,7 @@ const styles = StyleSheet.create({
   buttonsScrollContent: {
     alignItems: 'center',
     gap: 10,
+    paddingRight: 20,
   },
   actionButton: {
     flexDirection: 'row',
@@ -337,13 +360,6 @@ const styles = StyleSheet.create({
   },
   actionButtonPrimary: {
     backgroundColor: '#007AFF',
-  },
-  actionButtonClose: {
-    backgroundColor: '#E5E5EA',
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 0,
   },
   actionButtonText: {
     fontSize: 13,
