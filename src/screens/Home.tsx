@@ -1,4 +1,4 @@
-import React, { useState, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useLayoutEffect, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,7 @@ import {
   Alert,
   StyleSheet,
   ActivityIndicator,
-  ScrollView 
+  ScrollView,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
@@ -17,6 +17,8 @@ import { supabase } from '@/lib/supabaseClient';
 import { fetchStudentActivePlan } from '@/services/workout_planning.service';
 import { fetchCurrentOpenSession } from '@/services/workouts.service';
 import { Program, PlannedWorkout } from '@/types/coaching';
+
+import * as Updates from 'expo-updates';
 
 type HomeProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -34,6 +36,40 @@ export default function Home({ navigation }: HomeProps) {
   const [currentSession, setCurrentSession] = useState<OpenSession>(null);
   
   const [loadingPlan, setLoadingPlan] = useState(true);
+
+// Adicione isso logo no início do componente Home
+useEffect(() => {
+  async function checkUpdates() {
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        Alert.alert(
+          "Update Encontrado!",
+          "Baixando nova versão...",
+          [{ text: "OK" }]
+        );
+        await Updates.fetchUpdateAsync();
+        Alert.alert(
+          "Pronto!",
+          "O app será reiniciado para aplicar a atualização.",
+          [{ text: "Reiniciar", onPress: () => Updates.reloadAsync() }]
+        );
+      } else {
+        // Comente esta linha depois para não ficar chato
+        // Alert.alert("Sem updates", "Você já está na versão mais recente."); 
+        console.log("Nenhum update disponível. Runtime atual:", Updates.runtimeVersion);
+      }
+    } catch (error) {
+      // Isso nos dirá se o canal está errado ou se há erro de configuração
+      Alert.alert("Erro no Update", `Detalhe: ${error}`);
+    }
+  }
+
+  // Chama apenas se não estiver em desenvolvimento (simulador rodando metro)
+  if (!__DEV__) {
+    checkUpdates();
+  }
+}, []);
 
   // 1. Carrega dados do usuário (apenas uma vez ou quando foca, mas aqui deixamos no focus para garantir atualização de plano)
   useFocusEffect(
@@ -127,7 +163,7 @@ export default function Home({ navigation }: HomeProps) {
   return (
     <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
       <Text style={styles.welcomeText}>
-        Bem-vindo, {displayName || 'Atleta'}
+        Buenas, {displayName || 'Atleta'}
       </Text>
 
       {/* ÁREA DE TREINO PRESCRITO (COACH) */}
