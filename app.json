@@ -16,7 +16,7 @@
     "runtimeVersion": "1.0.3",
     "ios": {
       "bundleIdentifier": "com.mayconmatias.logbookedf",
-      "buildNumber": "8",
+      "buildNumber": "10",
       "supportsTablet": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -24,7 +24,7 @@
     },
     "android": {
       "package": "com.mayconmatias.logbookedf",
-      "versionCode": 8,
+      "versionCode": 10,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"

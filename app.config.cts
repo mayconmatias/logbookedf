@@ -19,7 +19,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: false, // [MANTIDO] Conforme seu input
     bundleIdentifier: "com.mayconmatias.logbookedf", 
-    buildNumber: "8", // [ATUALIZADO] Incremento de build
+    buildNumber: "10", // [ATUALIZADO] Incremento de build
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false
     }
@@ -27,7 +27,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   
   android: {
     package: "com.mayconmatias.logbookedf",
-    versionCode: 8, // [ATUALIZADO] Alinhado com iOS
+    versionCode: 10, // [ATUALIZADO] Alinhado com iOS
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png", 
       backgroundColor: "#ffffff"
@@ -45,10 +45,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 
   // [CORREÇÃO] Configuração completa para evitar avisos em Release
   updates: {
-    enabled: true,
+   enabled: true,
     url: "https://u.expo.dev/c69323ab-c81d-444e-821a-4dad327e89f8",
     checkAutomatically: 'ON_LOAD',
-    fallbackToCacheTimeout: 0
+    fallbackToCacheTimeout: 0,
+    // [ADICIONE ISSO AQUI] 👇
+    requestHeaders: {
+      'expo-channel-name': 'production' 
+    }
   },
 
   // [CORREÇÃO] Fixado para garantir match exato com a build nativa
