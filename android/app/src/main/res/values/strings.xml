@@ -1,4 +1,3 @@
 <resources>
-  <string name="app_name">Logbook EdF</string>
-  <string name="expo_runtime_version">1.0.3</string>
+  <string name="app_name">logbookedf</string>
 </resources>
