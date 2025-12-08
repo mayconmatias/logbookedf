@@ -1,12 +1,8 @@
-// src/types/workout.ts
+export type SetType = 'normal' | 'warmup' | 'drop' | 'rest_pause' | 'cluster' | 'biset' | 'triset';
 
-/**
- * Define a estrutura de uma única série (set) salva no banco.
- * (Corresponde à tabela 'sets' do Supabase)
- */
 export interface WorkoutSet {
   id: string;
-  exercise_id: string; // <-- ID da "Instância" (tabela 'exercises')
+  exercise_id: string;
   set_number: number;
   weight: number;
   reps: number;
@@ -15,35 +11,32 @@ export interface WorkoutSet {
   performed_at?: string;
   side?: 'E' | 'D';
   
-  // [NOVO] Campo opcional para passar o ID da sessão atual para o modal de share
-  sessionWorkoutId?: string; 
+  // Novos campos
+  set_type: SetType;
+  parent_set_id?: string | null; // Se for filho de um Drop/Cluster
+  
+  // Front-end only (para renderização aninhada)
+  subSets?: WorkoutSet[]; 
+  
+  sessionWorkoutId?: string; // Mantido do seu código anterior
 }
 
-/**
- * Define um exercício dentro de um treino salvo.
- * (Corresponde à nova RPC 'get_workout_data_grouped')
- */
 export interface WorkoutExercise {
-  id: string; // ID da "Instância" (da tabela 'exercises')
-  definition_id: string; // ID da "Definição"
-  name: string; // O nome (vem do JOIN com 'exercise_definitions')
+  id: string;
+  definition_id: string;
+  name: string;
   sets: WorkoutSet[];
 }
 
-/**
- * Define o item de histórico de treino (para WorkoutHistory.tsx).
- */
+// ... restante dos tipos (WorkoutHistoryItem, etc) mantidos
 export interface WorkoutHistoryItem {
   id: string;
   workout_date: string;
   user_id: string;
-  template_name?: string; // (Vindo do 'workouts.template_id' se existir)
+  template_name?: string;
   performed_data: WorkoutExercise[];
 }
 
-/**
- * Define o formato de uma série para o "quick history" (usado no WorkoutForm).
- */
 export type PerformanceSet = {
   id: string;
   set_number?: number;
@@ -55,26 +48,17 @@ export type PerformanceSet = {
   e1rm?: number;
 };
 
-/**
- * Os PRs agora são rastreados por 'definition_id'
- */
 export type HistoricalWeightPR = {
   definition_id: string;
   max_weight: number;
 };
 
-/**
- * Os PRs agora são rastreados por 'definition_id'
- */
 export type HistoricalRepPR = {
   definition_id: string;
   weight: number;
   max_reps: number;
 };
 
-/**
- * Agrupa todos os dados de "peek" de performance.
- */
 export interface PerformancePeekData {
   lastPerformance: PerformanceSet[];
   bestPerformance: PerformanceSet | null;
@@ -84,9 +68,6 @@ export interface PerformancePeekData {
   };
 }
 
-/**
- * Define o formato que o SetShareCard espera.
- */
 export interface HistoricalSet {
   date: string;
   weight: number;

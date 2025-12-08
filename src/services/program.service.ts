@@ -3,52 +3,53 @@ import { Program } from '@/types/coaching';
 
 /**
  * Busca todos os programas de um aluno específico.
- * Ordenado por data de criação (mais recentes primeiro).
  */
 export const fetchStudentPrograms = async (studentId: string): Promise<Program[]> => {
+  // [CORREÇÃO] Seleção explícita de colunas para evitar falhas de RLS/Join
   const { data, error } = await supabase
     .from('programs')
-    .select('*')
+    .select(`
+      id,
+      name,
+      description,
+      is_active,
+      is_template,
+      created_at,
+      origin_template_id,
+      coach_id,
+      student_id
+    `)
     .eq('student_id', studentId)
     .order('created_at', { ascending: false });
 
-  if (error) throw error;
+  if (error) {
+    console.error("Erro ao buscar programas:", error);
+    throw error;
+  }
   return data || [];
 };
 
 /**
  * Cria um novo programa de treino.
- * * Lógica Híbrida:
- * 1. Se studentId == usuário logado -> Usa RPC 'create_autoral_program' (Valida limite Free vs Pro).
- * 2. Se studentId != usuário logado -> Assume que é um Coach criando para o aluno (Insert direto).
  */
 export const createProgram = async (studentId: string, name: string): Promise<Program> => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Usuário não autenticado.');
 
-  // --- CENÁRIO 1: Usuário criando para si mesmo (Self-Coaching) ---
   if (studentId === user.id) {
-    // Chama a função do banco que verifica se ele já estourou o limite do plano Free
     const { data, error } = await supabase.rpc('create_autoral_program', {
       p_name: name
     });
-
-    if (error) {
-      // O erro do banco virá como "Limite atingido...", o front-end captura isso
-      throw new Error(error.message);
-    }
+    if (error) throw new Error(error.message);
     return data as Program;
-  } 
-  
-  // --- CENÁRIO 2: Coach criando para um aluno ---
-  else {
+  } else {
     const { data, error } = await supabase
       .from('programs')
       .insert({
         coach_id: user.id,
         student_id: studentId,
         name: name.trim(),
-        is_active: false,   // Cria inativo para não substituir o treino atual do aluno sem querer
+        is_active: false,
         is_template: false
       })
       .select('*')
@@ -61,12 +62,32 @@ export const createProgram = async (studentId: string, name: string): Promise<Pr
 
 /**
  * Define um programa como o ÚNICO ativo na Home do aluno.
- * Usa a RPC 'activate_program' que garante atomicidade (desativa os outros e ativa este).
  */
 export const setProgramActive = async (programId: string) => {
   const { error } = await supabase.rpc('activate_program', {
     p_program_id: programId
   });
-  
+  if (error) throw error;
+};
+
+/**
+ * Renomeia um programa existente.
+ */
+export const renameProgram = async (programId: string, newName: string) => {
+  const { error } = await supabase
+    .from('programs')
+    .update({ name: newName.trim() })
+    .eq('id', programId);
+  if (error) throw error;
+};
+
+/**
+ * Deleta um programa.
+ */
+export const deleteProgram = async (programId: string) => {
+  const { error } = await supabase
+    .from('programs')
+    .delete()
+    .eq('id', programId);
   if (error) throw error;
 };

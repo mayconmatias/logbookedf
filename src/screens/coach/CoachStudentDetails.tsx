@@ -1,44 +1,112 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  ScrollView,
+  Dimensions,
   Modal,
-  TextInput
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  FlatList,
+  Keyboard
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { RootStackParamList } from '@/types/navigation';
-import { Program } from '@/types/coaching';
-import { WorkoutHistoryItem } from '@/types/workout';
+import { Program, PlannedWorkout } from '@/types/coaching';
+import { supabase } from '@/lib/supabaseClient';
 
-import { fetchStudentPrograms, createProgram } from '@/services/program.service';
-import { fetchStudentHistory, fetchStudentUniqueExercises } from '@/services/coaching.service';
+import { 
+  fetchLatestCoachMessage, 
+  fetchMessageHistory, 
+  sendCoachingMessage,
+  CoachingMessage 
+} from '@/services/coaching.service';
 
 import { 
   ExerciseAnalyticsSheet, 
   ExerciseAnalyticsSheetRef 
 } from '@/components/ExerciseAnalyticsSheet';
 
+import t from '@/i18n/pt';
+
 type Props = NativeStackScreenProps<RootStackParamList, 'CoachStudentDetails'>;
 
-// Função auxiliar para calcular a cor do status
-const getStatusColor = (lastDate: string | null | undefined) => {
-  if (!lastDate) return '#CBD5E0'; 
-  
-  const today = new Date();
-  const last = new Date(lastDate);
-  const diffTime = Math.abs(today.getTime() - last.getTime());
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+const { width } = Dimensions.get('window');
 
-  if (diffDays <= 3) return '#38A169'; 
-  if (diffDays <= 7) return '#ECC94B'; 
-  return '#E53E3E'; 
+// --- Componente Auxiliar: Frequência ---
+const WeeklyTrackerCoach = ({ studentId }: { studentId: string }) => {
+  const [weekDays, setWeekDays] = useState<number[]>([]);
+  const days = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+  const todayIndex = new Date().getDay();
+
+  useFocusEffect(
+    useCallback(() => {
+      const loadFreq = async () => {
+        const curr = new Date();
+        const currentDayIndex = curr.getDay();
+        const startOfWeek = new Date(curr);
+        startOfWeek.setDate(curr.getDate() - currentDayIndex);
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+        const formatLocal = (d: Date) => {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
+
+        const { data } = await supabase
+          .from('workouts')
+          .select('workout_date')
+          .eq('user_id', studentId)
+          .gte('workout_date', formatLocal(startOfWeek))
+          .lte('workout_date', formatLocal(endOfWeek));
+        
+        if (data) {
+          const active = data.map(row => {
+            const [y, m, d] = row.workout_date.split('-').map(Number);
+            return new Date(y, m - 1, d).getDay();
+          });
+          setWeekDays([...new Set(active)]);
+        }
+      };
+      loadFreq();
+    }, [studentId])
+  );
+  
+  return (
+    <View style={styles.weeklyContainer}>
+      <Text style={styles.sectionHeaderSmall}>Frequência da Semana</Text>
+      <View style={styles.daysRow}>
+        {days.map((day, index) => {
+          const isToday = index === todayIndex;
+          const isCompleted = weekDays.includes(index);
+          return (
+            <View key={index} style={styles.dayWrapper}>
+              <View style={[
+                styles.dayCircle, 
+                isCompleted && styles.dayCompleted,
+                isToday && !isCompleted && styles.dayToday
+              ]}>
+                {isCompleted && <Feather name="check" size={12} color="#FFF" />}
+              </View>
+              <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>{day}</Text>
+            </View>
+          )
+        })}
+      </View>
+    </View>
+  );
 };
 
 export default function CoachStudentDetailsScreen({ navigation, route }: Props) {
@@ -46,290 +114,443 @@ export default function CoachStudentDetailsScreen({ navigation, route }: Props) 
   const studentName = relationship.student?.display_name || 'Aluno';
   const studentId = relationship.student_id;
 
-  const [activeTab, setActiveTab] = useState<'programs' | 'history'>('programs');
-  const [programs, setPrograms] = useState<Program[]>([]);
-  const [history, setHistory] = useState<WorkoutHistoryItem[]>([]);
+  const [activePlan, setActivePlan] = useState<{ program: Program, workouts: PlannedWorkout[] } | null>(null);
+  const [workoutLastDates, setWorkoutLastDates] = useState<Record<string, string>>({}); 
   const [loading, setLoading] = useState(true);
+  
+  // Mensagens
+  const [latestMessage, setLatestMessage] = useState<CoachingMessage | null>(null);
+  const [isMessageModalVisible, setIsMessageModalVisible] = useState(false);
+  const [messageHistory, setMessageHistory] = useState<CoachingMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingMsg, setSendingMsg] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  // --- ANALYTICS ---
+  // Analytics
   const analyticsSheetRef = useRef<ExerciseAnalyticsSheetRef>(null);
   const [isAnalyticsPickerVisible, setIsAnalyticsPickerVisible] = useState(false);
   const [studentExercises, setStudentExercises] = useState<{ definition_id: string; name: string }[]>([]);
   const [loadingExercises, setLoadingExercises] = useState(false);
   const [searchText, setSearchText] = useState('');
 
-  const loadData = async () => {
+  const loadDashboard = async () => {
     setLoading(true);
     try {
-      if (activeTab === 'programs') {
-        const data = await fetchStudentPrograms(studentId);
-        setPrograms(data);
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id || null);
+
+      // 1. Busca programa ativo
+      const { data: program } = await supabase
+        .from('programs')
+        .select('*')
+        .eq('student_id', studentId)
+        .eq('is_active', true)
+        .single();
+      
+      if (program) {
+        const { data: workouts } = await supabase
+          .from('planned_workouts')
+          .select('*')
+          .eq('program_id', program.id)
+          .order('day_order', { ascending: true });
+        
+        setActivePlan({ program, workouts: workouts || [] });
+
+        // 2. Busca últimas execuções
+        if (workouts && workouts.length > 0) {
+           const workoutIds = workouts.map(w => w.id);
+           const { data: history } = await supabase
+              .from('workouts')
+              .select('planned_workout_id, workout_date')
+              .eq('user_id', studentId)
+              .in('planned_workout_id', workoutIds)
+              .not('ended_at', 'is', null)
+              .order('workout_date', { ascending: false });
+           
+           const datesMap: Record<string, string> = {};
+           history?.forEach((h: any) => {
+              if (!datesMap[h.planned_workout_id]) {
+                 const [y, m, d] = h.workout_date.split('-');
+                 datesMap[h.planned_workout_id] = `${d}/${m}`;
+              }
+           });
+           setWorkoutLastDates(datesMap);
+        }
       } else {
-        const data = await fetchStudentHistory(studentId);
-        setHistory(data);
+        setActivePlan(null);
       }
-    } catch (e: any) {
-      Alert.alert('Erro', e.message);
+
+      // 3. Busca última mensagem
+      const msg = await fetchLatestCoachMessage(relationship.id);
+      setLatestMessage(msg);
+
+    } catch (e) {
+      console.log(e);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [activeTab]);
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+    }, [])
+  );
 
   useLayoutEffect(() => {
-    navigation.setOptions({ title: studentName });
-  }, [navigation, studentName]);
+    navigation.setOptions({ title: '' }); 
+  }, [navigation]);
 
-  const handleCreateProgram = () => {
-    Alert.prompt(
-      'Novo Programa',
-      `Nome do bloco de treino (ex: Hipertrofia A):`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Criar',
-          // [FIX TS] Tipagem explícita
-          onPress: async (name?: string) => {
-            if (!name) return;
-            try {
-              setLoading(true);
-              await createProgram(studentId, name);
-              Alert.alert('Sucesso', 'Programa criado!');
-              loadData();
-            } catch (e: any) {
-              Alert.alert('Erro', e.message);
-              setLoading(false);
-            }
-          },
-        },
-      ],
-      'plain-text'
-    );
+  // --- LÓGICA DE MENSAGENS ---
+  const handleOpenMessageModal = async () => {
+    setIsMessageModalVisible(true);
+    try {
+      const history = await fetchMessageHistory(relationship.id);
+      setMessageHistory(history);
+    } catch (e) { console.log(e); }
   };
 
+  const handleSendMessage = async () => {
+    if (!newMessage.trim()) return;
+    setSendingMsg(true);
+    try {
+      await sendCoachingMessage(relationship.id, newMessage);
+      setNewMessage('');
+      const history = await fetchMessageHistory(relationship.id);
+      setMessageHistory(history);
+      setLatestMessage(history[0]);
+    } catch (e: any) {
+      Alert.alert('Erro', e.message);
+    } finally {
+      setSendingMsg(false);
+    }
+  };
+
+  // --- LÓGICA DE ANALYTICS ---
   const handleOpenAnalyticsPicker = async () => {
     setIsAnalyticsPickerVisible(true);
     setLoadingExercises(true);
     try {
-      const exercises = await fetchStudentUniqueExercises(studentId);
-      setStudentExercises(exercises);
-    } catch (e: any) {
-      Alert.alert('Erro', 'Não foi possível carregar a lista de exercícios do aluno.');
-      setIsAnalyticsPickerVisible(false);
+      const { data } = await supabase.rpc('get_student_unique_exercises', { p_student_id: studentId });
+      setStudentExercises(data || []);
+    } catch (e) {
+      Alert.alert('Erro', 'Falha ao carregar exercícios.');
     } finally {
       setLoadingExercises(false);
     }
-  };
-
-  const handleSelectExerciseForAnalytics = (defId: string, name: string) => {
-    setIsAnalyticsPickerVisible(false);
-    // Pequeno delay para garantir que o modal anterior feche antes de abrir o Sheet nativo
-    setTimeout(() => {
-       analyticsSheetRef.current?.openSheet(defId, name, null, studentId);
-    }, 300);
   };
 
   const filteredExercises = studentExercises.filter(ex => 
     ex.name.toLowerCase().includes(searchText.toLowerCase())
   );
 
-  const renderProgramItem = ({ item }: { item: Program }) => (
-    <TouchableOpacity
-      style={[styles.card, item.is_active && styles.activeCard]}
-      onPress={() => navigation.navigate('CoachProgramDetails', { program: item })}
-    >
-      <View style={styles.cardHeader}>
-        <Text style={[styles.programName, item.is_active && styles.activeText]}>
-          {item.name}
-        </Text>
-        {item.is_active && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>ATIVO</Text>
-          </View>
-        )}
-      </View>
-      <Text style={styles.date}>
-        Criado em {new Date(item.created_at).toLocaleDateString('pt-BR')}
-      </Text>
-    </TouchableOpacity>
-  );
-
-  const renderHistoryItem = ({ item }: { item: WorkoutHistoryItem }) => (
-    <View style={styles.historyCard}>
-      <View style={styles.historyHeader}>
-        <Text style={styles.historyTitle}>{item.template_name}</Text>
-        <Text style={styles.historyDate}>
-          {new Date(item.workout_date).toLocaleDateString('pt-BR')}
-        </Text>
-      </View>
-      <View style={styles.historyBody}>
-        {item.performed_data.slice(0, 5).map((ex, idx) => (
-          <Text key={idx} style={styles.historyExercise} numberOfLines={1}>
-            • {ex.name}: {ex.sets.length} séries
-          </Text>
-        ))}
-        {item.performed_data.length > 5 && (
-           <Text style={styles.historyMore}>...e mais {item.performed_data.length - 5}</Text>
-        )}
-      </View>
-    </View>
-  );
-
   return (
     <View style={styles.container}>
-      
-      <View style={styles.headerActions}>
-        <TouchableOpacity style={styles.analyticsButton} onPress={handleOpenAnalyticsPicker}>
-          <Feather name="bar-chart-2" size={20} color="#007AFF" />
-          <Text style={styles.analyticsText}>Ver Progresso do Aluno</Text>
+      <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
+        
+        {/* HEADER DO ALUNO */}
+        <View style={styles.headerSection}>
+           <View style={styles.avatarCircle}>
+              <Text style={styles.avatarText}>{studentName.charAt(0).toUpperCase()}</Text>
+           </View>
+           <View>
+              <Text style={styles.headerTitle}>Treino de {studentName}</Text>
+              <Text style={styles.headerSubtitle}>Gestão e Prescrição</Text>
+           </View>
+        </View>
+
+        {/* MURAL DE MENSAGENS */}
+        <TouchableOpacity style={styles.messageBox} onPress={handleOpenMessageModal}>
+           <View style={styles.messageHeader}>
+              <Feather name="message-square" size={16} color="#007AFF" />
+              <Text style={styles.messageTitle}>Mural de Feedback</Text>
+              <Feather name="chevron-right" size={16} color="#CBD5E0" style={{marginLeft: 'auto'}} />
+           </View>
+           <Text style={styles.messageContent} numberOfLines={2}>
+              {latestMessage ? latestMessage.content : "Nenhuma mensagem recente. Toque para escrever."}
+           </Text>
+           {latestMessage && (
+             <Text style={styles.messageDate}>
+               {new Date(latestMessage.created_at).toLocaleDateString('pt-BR')}
+             </Text>
+           )}
         </TouchableOpacity>
-      </View>
 
-      <View style={styles.tabsContainer}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'programs' && styles.activeTab]}
-          onPress={() => setActiveTab('programs')}
-        >
-          <Feather name="calendar" size={16} color={activeTab === 'programs' ? '#007AFF' : '#718096'} />
-          <Text style={[styles.tabText, activeTab === 'programs' && styles.activeTabText]}>
-            Programas
-          </Text>
-        </TouchableOpacity>
+        <WeeklyTrackerCoach studentId={studentId} />
 
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'history' && styles.activeTab]}
-          onPress={() => setActiveTab('history')}
-        >
-          <Feather name="clock" size={16} color={activeTab === 'history' ? '#007AFF' : '#718096'} />
-          <Text style={[styles.tabText, activeTab === 'history' && styles.activeTabText]}>
-            Histórico
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} size="large" color="#007AFF" />
-      ) : (
-        <>
-          {activeTab === 'programs' ? (
-            <FlatList
-              data={programs}
-              keyExtractor={(item) => item.id}
-              renderItem={renderProgramItem}
-              contentContainerStyle={{ paddingBottom: 80 }}
-              ListEmptyComponent={
-                <Text style={styles.emptyText}>Nenhum programa criado.</Text>
-              }
-            />
-          ) : (
-            <FlatList
-              data={history}
-              keyExtractor={(item) => item.id}
-              renderItem={renderHistoryItem}
-              contentContainerStyle={{ paddingBottom: 20 }}
-              ListEmptyComponent={
-                <Text style={styles.emptyText}>O aluno ainda não registrou treinos.</Text>
-              }
-            />
-          )}
-        </>
-      )}
-
-      {activeTab === 'programs' && (
-        <TouchableOpacity style={styles.fab} onPress={handleCreateProgram}>
-          <Feather name="plus" size={24} color="#FFF" />
-          <Text style={styles.fabText}>Novo Programa</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Modal Nativo para Picker */}
-      <Modal
-        visible={isAnalyticsPickerVisible}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setIsAnalyticsPickerVisible(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Analisar Exercício</Text>
-            <TouchableOpacity onPress={() => setIsAnalyticsPickerVisible(false)}>
-              <Text style={styles.closeText}>Fechar</Text>
-            </TouchableOpacity>
+        {/* PROGRAMA ATIVO - CARROSSEL */}
+        <View style={styles.sectionCompact}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionHeaderSmall}>Plano Ativo</Text>
+            {activePlan && <Text style={styles.planNameSmall}>{activePlan.program.name}</Text>}
           </View>
+          
+          {loading ? (
+            <ActivityIndicator style={{marginTop: 20}} />
+          ) : activePlan && activePlan.workouts.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cardsScrollCompact}>
+              {activePlan.workouts.map((workout, index) => {
+                const gradients = [ ['#007AFF', '#0056b3'], ['#38A169', '#276749'], ['#805AD5', '#553C9A'], ['#D69E2E', '#975A16'] ];
+                const currentGradient = gradients[index % gradients.length];
+                const lastDate = workoutLastDates[workout.id] || "Nunca";
 
-          <TextInput 
-            style={styles.searchInput}
-            placeholder="Buscar exercício..."
-            value={searchText}
-            onChangeText={setSearchText}
-          />
-
-          {loadingExercises ? (
-            <ActivityIndicator style={{ marginTop: 20 }} size="large" color="#007AFF" />
+                return (
+                  <TouchableOpacity 
+                    key={workout.id} 
+                    onPress={() => navigation.navigate('CoachWorkoutEditor', { workout })}
+                    activeOpacity={0.9}
+                  >
+                    <LinearGradient
+                      colors={currentGradient as any}
+                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                      style={styles.workoutCardCompact}
+                    >
+                      <View style={styles.cardContentCompact}>
+                        <View style={styles.cardInfoCompact}>
+                           <Text style={styles.cardTitleCompact} numberOfLines={2}>{workout.name}</Text>
+                           <Text style={styles.cardDateCompact}>Último: {lastDate}</Text>
+                        </View>
+                      </View>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           ) : (
-            <FlatList
-              data={filteredExercises}
-              keyExtractor={(item) => item.definition_id}
-              renderItem={({ item }) => (
-                <TouchableOpacity 
-                  style={styles.pickerItem}
-                  onPress={() => handleSelectExerciseForAnalytics(item.definition_id, item.name)}
-                >
-                  <Text style={styles.pickerItemText}>{item.name}</Text>
-                  <Feather name="chevron-right" size={20} color="#CBD5E0" />
-                </TouchableOpacity>
-              )}
-              ListEmptyComponent={
-                <Text style={styles.emptyText}>
-                   {searchText ? 'Nenhum exercício encontrado.' : 'Este aluno ainda não registrou exercícios.'}
-                </Text>
-              }
-            />
+            <TouchableOpacity style={styles.emptyProgramCard} onPress={() => navigation.navigate('CoachStudentPrograms', { studentId, studentName })}> 
+               <Text style={styles.emptyProgramText}>Nenhum plano ativo.</Text>
+               <Text style={styles.linkText}>Ver Programas</Text>
+            </TouchableOpacity>
           )}
         </View>
+
+        {/* GRID DE AÇÕES */}
+        <View style={styles.grid}>
+           <TouchableOpacity 
+             style={styles.gridButton} 
+             onPress={() => Alert.alert('Em breve', 'Histórico completo nesta tela.')}
+           >
+             <View style={[styles.iconCircle, { backgroundColor: '#E6FFFA' }]}>
+               <Feather name="clock" size={24} color="#319795" />
+             </View>
+             <Text style={styles.gridText}>Histórico</Text>
+           </TouchableOpacity>
+
+           <TouchableOpacity 
+             style={styles.gridButton}
+             onPress={() => navigation.navigate('CoachStudentPrograms', { studentId, studentName })}
+           >
+             <View style={[styles.iconCircle, { backgroundColor: '#EBF8FF' }]}>
+               <Feather name="layers" size={24} color="#007AFF" />
+             </View>
+             <Text style={styles.gridText}>Programas</Text>
+           </TouchableOpacity>
+
+           <TouchableOpacity 
+             style={styles.gridButton}
+             onPress={handleOpenAnalyticsPicker}
+           >
+             <View style={[styles.iconCircle, { backgroundColor: '#FAF5FF' }]}>
+               <Feather name="bar-chart-2" size={24} color="#805AD5" />
+             </View>
+             <Text style={styles.gridText}>Estatísticas</Text>
+           </TouchableOpacity>
+
+           <TouchableOpacity 
+              style={styles.gridButton}
+              onPress={() => Alert.alert('Remover', 'Função de remover aluno em breve.')}
+           >
+             <View style={[styles.iconCircle, { backgroundColor: '#FFF5F5' }]}>
+               <Feather name="user-x" size={24} color="#E53E3E" />
+             </View>
+             <Text style={styles.gridText}>Remover</Text>
+           </TouchableOpacity>
+        </View>
+
+      </ScrollView>
+
+      {/* --- MODAL DE MENSAGENS (CHAT) --- */}
+      <Modal visible={isMessageModalVisible} animationType="slide" presentationStyle="pageSheet">
+         <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+            style={styles.chatModalContainer}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+         >
+           <View style={styles.modalHeader}>
+              <View>
+                 <Text style={styles.modalTitle}>Chat com {studentName}</Text>
+                 <Text style={styles.modalSubtitle}>Histórico de Feedback</Text>
+              </View>
+              <TouchableOpacity onPress={() => setIsMessageModalVisible(false)} style={styles.closeBtn}>
+                <Feather name="x" size={24} color="#4A5568" />
+              </TouchableOpacity>
+           </View>
+
+           <FlatList
+             data={messageHistory}
+             inverted
+             keyExtractor={item => item.id}
+             contentContainerStyle={{ padding: 16, paddingBottom: 20 }}
+             renderItem={({ item }) => {
+               const isMe = item.sender_id === currentUserId;
+               return (
+                 <View style={[
+                   styles.chatBubble,
+                   isMe ? styles.chatBubbleMe : styles.chatBubbleThem
+                 ]}>
+                    <Text style={[styles.chatText, isMe ? styles.chatTextMe : styles.chatTextThem]}>
+                      {item.content}
+                    </Text>
+                    <Text style={[styles.chatDate, isMe ? styles.chatDateMe : styles.chatDateThem]}>
+                      {new Date(item.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                 </View>
+               );
+             }}
+           />
+
+           <View style={styles.inputArea}>
+              <TextInput 
+                style={styles.chatInput}
+                placeholder="Escreva uma mensagem..."
+                value={newMessage}
+                onChangeText={setNewMessage}
+                multiline
+                placeholderTextColor="#A0AEC0"
+              />
+              <TouchableOpacity 
+                style={[styles.sendButton, !newMessage.trim() && styles.sendButtonDisabled]} 
+                onPress={handleSendMessage}
+                disabled={sendingMsg || !newMessage.trim()}
+              >
+                {sendingMsg ? <ActivityIndicator color="#FFF" size="small" /> : <Feather name="send" size={20} color="#FFF" />}
+              </TouchableOpacity>
+           </View>
+         </KeyboardAvoidingView>
       </Modal>
 
+      {/* --- MODAL DE EXERCÍCIOS (ANALYTICS) --- */}
+      <Modal visible={isAnalyticsPickerVisible} animationType="slide" presentationStyle="pageSheet">
+        <View style={{flex: 1, backgroundColor: '#F7FAFC'}}>
+           <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Analisar Exercício</Text>
+              <TouchableOpacity onPress={() => setIsAnalyticsPickerVisible(false)}>
+                <Text style={styles.closeText}>Fechar</Text>
+              </TouchableOpacity>
+           </View>
+           <TextInput 
+             style={styles.searchInput}
+             placeholder="Buscar exercício..."
+             value={searchText}
+             onChangeText={setSearchText}
+           />
+           {loadingExercises ? <ActivityIndicator style={{marginTop: 20}} /> : (
+             <FlatList
+               data={filteredExercises}
+               keyExtractor={item => item.definition_id}
+               renderItem={({ item }) => (
+                 <TouchableOpacity 
+                   style={styles.pickerItem}
+                   onPress={() => {
+                     setIsAnalyticsPickerVisible(false);
+                     setTimeout(() => analyticsSheetRef.current?.openSheet(item.definition_id, item.name, null, studentId), 300);
+                   }}
+                 >
+                   <Text style={styles.pickerItemText}>{item.name}</Text>
+                   <Feather name="chevron-right" size={20} color="#CBD5E0" />
+                 </TouchableOpacity>
+               )}
+             />
+           )}
+        </View>
+      </Modal>
+      
       <ExerciseAnalyticsSheet ref={analyticsSheetRef} />
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F7FAFC', padding: 16 },
-  headerActions: { marginBottom: 16 },
-  analyticsButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#EBF8FF', paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: '#BEE3F8' },
-  analyticsText: { marginLeft: 8, color: '#007AFF', fontWeight: '600', fontSize: 16 },
-  tabsContainer: { flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 12, padding: 4, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0' },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8, gap: 8 },
-  activeTab: { backgroundColor: '#EBF8FF' },
-  tabText: { fontSize: 14, fontWeight: '600', color: '#718096' },
-  activeTabText: { color: '#007AFF' },
-  card: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
-  activeCard: { borderColor: '#007AFF', backgroundColor: '#F0F9FF' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  programName: { fontSize: 16, fontWeight: '700', color: '#2D3748' },
-  activeText: { color: '#007AFF' },
-  badge: { backgroundColor: '#007AFF', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  date: { fontSize: 12, color: '#718096' },
-  historyCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
-  historyHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderBottomWidth: 1, borderBottomColor: '#EDF2F7', paddingBottom: 8 },
-  historyTitle: { fontSize: 16, fontWeight: '700', color: '#2D3748' },
-  historyDate: { fontSize: 14, color: '#718096' },
-  historyBody: { marginTop: 4 },
-  historyExercise: { fontSize: 14, color: '#4A5568', marginBottom: 2 },
-  historyMore: { fontSize: 12, color: '#A0AEC0', fontStyle: 'italic', marginTop: 2 },
-  emptyText: { textAlign: 'center', color: '#A0AEC0', marginTop: 40 },
-  fab: { position: 'absolute', bottom: 24, right: 24, backgroundColor: '#007AFF', flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 30, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5 },
-  fabText: { color: '#FFF', fontWeight: 'bold', marginLeft: 8 },
-  modalContainer: { flex: 1, backgroundColor: '#F7FAFC' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, alignItems: 'center', backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
-  modalTitle: { fontSize: 18, fontWeight: 'bold' },
+  container: { flex: 1, backgroundColor: '#F7FAFC', paddingHorizontal: 20 },
+  headerSection: { flexDirection: 'row', alignItems: 'center', marginTop: 20, marginBottom: 20 },
+  avatarCircle: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  avatarText: { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
+  headerTitle: { fontSize: 22, fontWeight: '800', color: '#1A202C' },
+  headerSubtitle: { fontSize: 14, color: '#718096' },
+
+  messageBox: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 20, shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 },
+  messageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 },
+  messageTitle: { fontSize: 14, fontWeight: '700', color: '#2D3748', textTransform: 'uppercase' },
+  messageContent: { fontSize: 15, color: '#4A5568', fontStyle: 'italic', marginBottom: 4 },
+  messageDate: { fontSize: 11, color: '#A0AEC0', textAlign: 'right' },
+
+  weeklyContainer: { flexDirection: 'column', marginBottom: 20, backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#EDF2F7' },
+  sectionHeaderSmall: { fontSize: 13, fontWeight: '700', color: '#718096', textTransform: 'uppercase', letterSpacing: 0.5 },
+  daysRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
+  dayWrapper: { alignItems: 'center', gap: 6 },
+  dayCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#EDF2F7', alignItems: 'center', justifyContent: 'center' },
+  dayCompleted: { backgroundColor: '#38A169' },
+  dayToday: { borderWidth: 2, borderColor: '#007AFF', backgroundColor: '#FFF' },
+  dayLabel: { fontSize: 12, color: '#A0AEC0', fontWeight: '600' },
+  dayLabelToday: { color: '#007AFF' },
+
+  // Estilos do Carrossel (Igual Home)
+  sectionCompact: { marginBottom: 24 },
+  sectionHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 },
+  planNameSmall: { fontSize: 14, fontWeight: '600', color: '#007AFF' },
+  cardsScrollCompact: { paddingRight: 20, gap: 10 },
+  workoutCardCompact: { width: 140, height: 80, borderRadius: 12, padding: 12, justifyContent: 'center' },
+  cardContentCompact: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  cardInfoCompact: { alignItems: 'center' },
+  cardTitleCompact: { color: '#FFF', fontSize: 15, fontWeight: '700', textAlign: 'center', marginBottom: 4 },
+  cardDateCompact: { color: 'rgba(255,255,255,0.9)', fontSize: 11, fontWeight: '600' },
+  emptyProgramCard: { backgroundColor: '#EDF2F7', padding: 20, borderRadius: 12, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: '#A0AEC0' },
+  emptyProgramText: { color: '#718096', marginBottom: 4 },
+  linkText: { color: '#007AFF', fontWeight: '700' },
+
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  gridButton: { width: (width - 52) / 2, backgroundColor: '#FFF', padding: 16, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#EDF2F7' },
+  iconCircle: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  gridText: { fontSize: 14, fontWeight: '600', color: '#4A5568' },
+
+  // Styles Modal Chat
+  chatModalContainer: { flex: 1, backgroundColor: '#F0F2F5' }, 
+  modalHeader: { 
+    flexDirection: 'row', justifyContent: 'space-between', padding: 16, paddingTop: 20, 
+    backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', alignItems: 'center',
+    shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 2, elevation: 2
+  },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#1A202C' },
+  modalSubtitle: { fontSize: 12, color: '#718096' },
+  closeBtn: { padding: 8 },
   closeText: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
+
+  chatBubble: { padding: 12, borderRadius: 16, marginBottom: 8, maxWidth: '80%' },
+  chatBubbleMe: { backgroundColor: '#DCF8C6', alignSelf: 'flex-end', borderBottomRightRadius: 2 }, 
+  chatBubbleThem: { backgroundColor: '#FFF', alignSelf: 'flex-start', borderBottomLeftRadius: 2 }, 
+  chatText: { fontSize: 15 },
+  chatTextMe: { color: '#000' },
+  chatTextThem: { color: '#000' },
+  
+  chatDate: { fontSize: 10, marginTop: 4, textAlign: 'right' },
+  chatDateMe: { color: 'rgba(0,0,0,0.4)' },
+  chatDateThem: { color: '#A0AEC0' },
+
+  inputArea: { 
+    flexDirection: 'row', padding: 10, paddingBottom: 30, 
+    backgroundColor: '#FFF', alignItems: 'flex-end', borderTopWidth: 1, borderColor: '#E2E8F0' 
+  },
+  chatInput: { 
+    flex: 1, backgroundColor: '#F7FAFC', borderRadius: 20, paddingHorizontal: 16, 
+    paddingVertical: 10, fontSize: 15, maxHeight: 100, borderWidth: 1, borderColor: '#E2E8F0' 
+  },
+  sendButton: { 
+    width: 44, height: 44, borderRadius: 22, backgroundColor: '#007AFF', 
+    alignItems: 'center', justifyContent: 'center', marginLeft: 8, marginBottom: 2
+  },
+  sendButtonDisabled: { backgroundColor: '#CBD5E0' },
+
+  // Picker Styles
   searchInput: { margin: 16, backgroundColor: '#FFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0', fontSize: 16 },
   pickerItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#EDF2F7' },
   pickerItemText: { fontSize: 16, color: '#2D3748' },

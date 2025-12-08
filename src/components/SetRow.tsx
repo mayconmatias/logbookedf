@@ -5,6 +5,7 @@ import { WorkoutSet } from '@/types/workout';
 
 interface SetRowProps {
   set: WorkoutSet;
+  allSetsInExercise?: WorkoutSet[]; 
   exerciseId: string;
   definitionId: string;
   exerciseName: string;
@@ -18,6 +19,7 @@ interface SetRowProps {
 const SetRow = memo(
   ({
     set,
+    allSetsInExercise,
     exerciseId,
     definitionId,
     exerciseName,
@@ -28,87 +30,126 @@ const SetRow = memo(
     onDelete,
   }: SetRowProps) => {
     
-    const isGhostSet = useMemo(() => {
-      return set.weight === 0 && set.reps === 0;
-    }, [set.weight, set.reps]);
+    const childSets = useMemo(() => {
+       if (!allSetsInExercise) return [];
+       return allSetsInExercise.filter(s => s.parent_set_id === set.id);
+    }, [allSetsInExercise, set.id]);
 
-    const handlePress = () => {
-      onEdit(set);
+    const displayNumber = useMemo(() => {
+      if (!allSetsInExercise) return set.set_number;
+      const isCurrentWarmup = set.set_type === 'warmup';
+      const relevantSets = allSetsInExercise
+        .filter(s => !s.parent_set_id) 
+        .filter(s => {
+           const isItemWarmup = s.set_type === 'warmup';
+           return isCurrentWarmup ? isItemWarmup : !isItemWarmup;
+        })
+        .sort((a, b) => a.set_number - b.set_number);
+
+      const index = relevantSets.findIndex(s => s.id === set.id);
+      return index >= 0 ? index + 1 : set.set_number;
+    }, [allSetsInExercise, set.id, set.set_type, set.set_number]);
+
+    if (set.parent_set_id) return null;
+
+    const handlePress = () => onEdit(set);
+    const handleShare = () => onShare(set, isPR, exerciseName, definitionId);
+    const handleDelete = () => onDelete(set.id, exerciseId, definitionId);
+
+    const isWarmup = set.set_type === 'warmup';
+    const isSuper = ['biset', 'triset'].includes(set.set_type);
+    
+    const getTagLabel = () => {
+      switch (set.set_type) {
+        case 'drop': return 'DROP';
+        case 'rest_pause': return 'REST-P';
+        case 'cluster': return 'CLUSTER';
+        case 'biset': return 'BI-SET';
+        case 'triset': return 'TRI-SET';
+        default: return null;
+      }
     };
-
-    const handleShare = () => {
-      onShare(set, isPR, exerciseName, definitionId);
-    }
-
-    const handleDelete = () => {
-      onDelete(set.id, exerciseId, definitionId);
-    };
-
-    if (isGhostSet) {
-      return (
-        <TouchableOpacity
-          style={[styles.setRow, styles.ghostRow]}
-          onPress={handlePress}
-          disabled={isFetchingShareData}
-        >
-          <View style={styles.setRowContent}>
-            <View style={styles.setTextContainer}>
-              <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
-                <Feather name="square" size={18} color="#D97706" />
-                <Text style={styles.ghostText}>
-                  <Text style={{ fontWeight: 'bold' }}>Série {set.set_number}:</Text>{' '}
-                  Pendente
-                </Text>
-              </View>
-              {set.rpe ? (
-                <Text style={styles.ghostSubText}>Meta: RPE {set.rpe}</Text>
-              ) : (
-                <Text style={styles.ghostSubText}>Toque para registrar carga e reps</Text>
-              )}
-            </View>
-            <TouchableOpacity style={styles.deleteSetButton} onPress={handleDelete}>
-              <Feather name="x" size={16} color="#A0AEC0" />
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      );
-    }
+    const tagLabel = getTagLabel();
 
     return (
       <TouchableOpacity
-        style={[styles.setRow, isPR && styles.prRow]}
+        style={[
+          styles.container, 
+          isPR && styles.prContainer, 
+          isWarmup && styles.warmupContainer,
+          isSuper && styles.superContainer
+        ]}
         onPress={handlePress}
         disabled={isFetchingShareData}
+        activeOpacity={0.7}
       >
-        <View style={styles.setRowContent}>
-          <View style={styles.setTextContainer}>
-            <Text style={styles.setText}>
-              {isPR ? '🏆 ' : ''}
-              <Text style={{ fontWeight: 'bold' }}>Série {set.set_number}:</Text>{' '}
-              {set.weight}kg x {set.reps} reps
-              {set.side ? ` (${set.side})` : ''}
-              {set.rpe ? ` @ RPE ${set.rpe}` : ''}
-            </Text>
-            {set.observations && (
-              <Text style={styles.obsText}>↳ {set.observations}</Text>
-            )}
-            <Text style={styles.timeText}>
-              {set.performed_at
-                ? new Date(set.performed_at).toLocaleTimeString('pt-BR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : '...'}
-            </Text>
+        <View style={styles.contentRow}>
+          <View style={styles.badgeColumn}>
+             <View style={[styles.setNumberBadge, isWarmup && styles.warmupBadge]}>
+                <Text style={[styles.setNumberText, isWarmup && styles.warmupText]}>
+                  {isWarmup ? 'AQ' : '#'}{displayNumber}
+                </Text>
+             </View>
+             {isPR && <Feather name="award" size={12} color="#D69E2E" style={{marginTop: 4}} />}
           </View>
-          
-          <View style={styles.actions}>
-            <TouchableOpacity style={styles.deleteSetButton} onPress={handleShare}>
-              <Feather name="share-2" size={18} color="#007AFF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.deleteSetButton} onPress={handleDelete}>
-              <Feather name="trash-2" size={18} color="#FF3B30" />
-            </TouchableOpacity>
+
+          <View style={styles.dataColumn}>
+             <View style={styles.mainLine}>
+                <Text style={styles.weightText}>
+                   {set.weight} <Text style={styles.unit}>kg</Text>
+                </Text>
+                <Text style={styles.separator}>×</Text>
+                <Text style={styles.repsText}>
+                   {set.reps} <Text style={styles.unit}>reps</Text>
+                </Text>
+                {set.rpe && (
+                  <View style={styles.rpeBadge}>
+                    <Text style={styles.rpeText}>@{set.rpe}</Text>
+                  </View>
+                )}
+             </View>
+
+             {(tagLabel || set.side) && (
+               <View style={styles.metaLine}>
+                  {tagLabel && <Text style={[styles.metaTag, { color: '#E53E3E' }]}>{tagLabel}</Text>}
+                  {set.side && <Text style={styles.metaSide}>{set.side === 'E' ? 'Esq.' : 'Dir.'}</Text>}
+               </View>
+             )}
+
+             {set.observations ? (
+               <Text style={styles.obsText} numberOfLines={1}>
+                 <Feather name="message-square" size={10} /> {set.observations}
+               </Text>
+             ) : null}
+
+             {childSets.length > 0 && (
+               <View style={styles.childrenContainer}>
+                  {childSets.map((child) => {
+                    const diff = set.weight - child.weight;
+                    const perc = set.weight > 0 ? Math.round((diff / set.weight) * 100) : 0;
+                    return (
+                      <View key={child.id} style={styles.childRow}>
+                         <Feather name="corner-down-right" size={12} color="#718096" style={{marginRight: 4}} />
+                         <Text style={styles.childText}>
+                            {child.weight}kg × {child.reps}
+                            {perc > 0 && <Text style={styles.dropPerc}> (-{perc}%)</Text>}
+                         </Text>
+                      </View>
+                    );
+                  })}
+               </View>
+             )}
+          </View>
+
+          <View style={styles.actionsColumn}>
+             {!isWarmup && (
+                <TouchableOpacity style={styles.actionBtn} onPress={handleShare}>
+                   <Feather name="share-2" size={16} color="#718096" />
+                </TouchableOpacity>
+             )}
+             <TouchableOpacity style={[styles.actionBtn, styles.deleteBtn]} onPress={handleDelete}>
+                <Feather name="trash-2" size={16} color="#E53E3E" />
+             </TouchableOpacity>
           </View>
         </View>
       </TouchableOpacity>
@@ -117,18 +158,35 @@ const SetRow = memo(
 );
 
 const styles = StyleSheet.create({
-  setRow: { marginBottom: 8, paddingVertical: 10, paddingHorizontal: 8, borderRadius: 8 },
-  prRow: { backgroundColor: '#FFFBEB' },
-  ghostRow: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB', borderStyle: 'dashed' },
-  setRowContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  setTextContainer: { flex: 1, marginRight: 10 },
-  setText: { fontSize: 16, color: '#333', flexWrap: 'wrap' },
-  ghostText: { fontSize: 16, color: '#D97706' },
-  ghostSubText: { fontSize: 12, color: '#6B7280', fontStyle: 'italic', marginLeft: 26, marginTop: 2 },
-  obsText: { fontSize: 14, color: '#555', fontStyle: 'italic', marginLeft: 10, marginTop: 2 },
-  timeText: { fontSize: 12, color: '#888', marginTop: 2 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  deleteSetButton: { padding: 8 },
+  container: { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingVertical: 10, paddingHorizontal: 12 },
+  prContainer: { backgroundColor: '#FFFAF0' },
+  warmupContainer: { backgroundColor: '#F7FAFC' },
+  superContainer: { borderLeftWidth: 3, borderLeftColor: '#DD6B20' },
+  contentRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  badgeColumn: { width: 36, alignItems: 'center', marginRight: 10, paddingTop: 2 },
+  setNumberBadge: { backgroundColor: '#EDF2F7', borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2, minWidth: 24, alignItems: 'center' },
+  warmupBadge: { backgroundColor: '#FEFCBF' },
+  setNumberText: { fontSize: 11, fontWeight: '900', color: '#4A5568' },
+  warmupText: { color: '#D69E2E' },
+  dataColumn: { flex: 1, justifyContent: 'center' },
+  mainLine: { flexDirection: 'row', alignItems: 'baseline' },
+  weightText: { fontSize: 16, fontWeight: '800', color: '#1A202C' },
+  repsText: { fontSize: 16, fontWeight: '800', color: '#1A202C' },
+  separator: { fontSize: 14, color: '#A0AEC0', marginHorizontal: 4 },
+  unit: { fontSize: 11, fontWeight: '500', color: '#718096' },
+  rpeBadge: { marginLeft: 8, backgroundColor: '#EDF2F7', borderRadius: 4, paddingHorizontal: 4 },
+  rpeText: { fontSize: 10, fontWeight: '700', color: '#4A5568' },
+  metaLine: { flexDirection: 'row', gap: 6, marginTop: 2 },
+  metaTag: { fontSize: 9, fontWeight: '800', color: '#D69E2E', textTransform: 'uppercase' },
+  metaSide: { fontSize: 9, fontWeight: '700', color: '#718096' },
+  obsText: { fontSize: 11, color: '#718096', fontStyle: 'italic', marginTop: 2 },
+  childrenContainer: { marginTop: 4, paddingLeft: 4 },
+  childRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
+  childText: { fontSize: 13, color: '#4A5568', fontWeight: '500' },
+  dropPerc: { fontSize: 11, color: '#E53E3E' },
+  actionsColumn: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  actionBtn: { padding: 6 },
+  deleteBtn: { marginRight: -6 },
 });
 
 export default SetRow;

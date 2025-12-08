@@ -1,14 +1,21 @@
-// src/hooks/usePerformancePeek.ts
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { PerformancePeekData } from '@/types/workout';
 import { ExerciseStats } from '@/types/analytics';
-import { fetchExerciseStats } from '@/services/stats.service'; // Novo serviço
+import { fetchPerformancePeek } from '@/services/exercises.service';
+import { fetchExerciseStats } from '@/services/stats.service';
 
 export const usePerformancePeek = () => {
   const [loadingStats, setLoadingStats] = useState(false);
+  
+  // Dados de histórico (última sessão, melhor série para exibição)
+  const [performanceData, setPerformanceData] = useState<PerformancePeekData | null>(null);
+  
+  // Dados estatísticos (para cálculo de PR)
   const [exerciseStats, setExerciseStats] = useState<ExerciseStats | null>(null);
   
-  // Cache simples em memória para não buscar a mesma coisa mil vezes na mesma sessão
-  const cache = useRef<Map<string, ExerciseStats>>(new Map());
+  const cachePeek = useRef<Map<string, PerformancePeekData>>(new Map());
+  const cacheStats = useRef<Map<string, ExerciseStats>>(new Map());
+  
   const isMounted = useRef(true);
 
   useEffect(() => {
@@ -17,6 +24,7 @@ export const usePerformancePeek = () => {
   }, []);
 
   const clearPeek = useCallback(() => {
+    setPerformanceData(null);
     setExerciseStats(null);
   }, []);
 
@@ -26,36 +34,51 @@ export const usePerformancePeek = () => {
       return;
     }
 
-    if (cache.current.has(definitionId)) {
-      setExerciseStats(cache.current.get(definitionId)!);
+    // Se já tiver em cache, usa
+    if (cachePeek.current.has(definitionId) && cacheStats.current.has(definitionId)) {
+      setPerformanceData(cachePeek.current.get(definitionId)!);
+      setExerciseStats(cacheStats.current.get(definitionId)!);
       return;
     }
 
     setLoadingStats(true);
     try {
-      const stats = await fetchExerciseStats(definitionId);
-      if (isMounted.current && stats) {
-        setExerciseStats(stats);
-        cache.current.set(definitionId, stats);
-      } else if (isMounted.current) {
-        setExerciseStats(null); // Nenhum histórico ainda
+      // Busca em paralelo: Histórico visual + Estatísticas matemáticas
+      const [peekData, statsData] = await Promise.all([
+        fetchPerformancePeek(definitionId),
+        fetchExerciseStats(definitionId)
+      ]);
+
+      if (isMounted.current) {
+        if (peekData) {
+          setPerformanceData(peekData);
+          cachePeek.current.set(definitionId, peekData);
+        }
+        if (statsData) {
+          setExerciseStats(statsData);
+          cacheStats.current.set(definitionId, statsData);
+        } else {
+          // Se não tiver stats (exercício novo), reseta
+          setExerciseStats(null);
+        }
       }
     } catch (e) {
-      console.error(e);
+      console.error("Erro ao buscar stats:", e);
     } finally {
       if (isMounted.current) setLoadingStats(false);
     }
   }, [clearPeek]);
 
-  // [IMPORTANTE] Função para forçar atualização (ex: após salvar um PR)
   const invalidateCache = useCallback((definitionId: string) => {
-    cache.current.delete(definitionId);
+    cachePeek.current.delete(definitionId);
+    cacheStats.current.delete(definitionId);
     fetchQuickStats(definitionId);
   }, [fetchQuickStats]);
 
   return {
     loadingStats,
-    exerciseStats, // Objeto limpo com max_e1rm, max_weight, etc.
+    performanceData, 
+    exerciseStats, // [CORREÇÃO] Agora o hook retorna isso
     fetchQuickStats,
     invalidateCache,
     clearPeek

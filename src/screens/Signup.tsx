@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { View, Text, TextInput, Button, Alert, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, TextInput, Alert, StyleSheet, TouchableOpacity } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 import type { RootStackParamList } from "@/types/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { validateCPF } from "@/utils/validation"; // <-- 1. Importar o validador
-import t from "@/i18n/pt"; // <-- 2. Importar as strings
+import { validateCPF } from "@/utils/validation"; 
+import t from "@/i18n/pt"; 
 
 export default function Signup({ navigation }: NativeStackScreenProps<RootStackParamList, "Signup">) {
   const [email, setEmail] = useState("");
@@ -14,7 +14,6 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async () => {
-    // 3. Aplicar validação
     if (!email || !password || !cpf) {
       return Alert.alert(t.common.attention, t.auth.validationFields);
     }
@@ -47,12 +46,12 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
 
   return (
     <View style={styles.container}>
-      {/* 4. Substituir strings por 't' */}
       <Text style={styles.title}>{t.auth.signupTitle}</Text>
       
       <TextInput
         style={styles.input}
         placeholder={t.auth.emailPlaceholder}
+        placeholderTextColor="#A0AEC0" // [CORREÇÃO]
         autoCapitalize="none"
         keyboardType="email-address"
         value={email}
@@ -61,6 +60,7 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
       <TextInput
         style={styles.input}
         placeholder={t.auth.cpfPlaceholder}
+        placeholderTextColor="#A0AEC0" // [CORREÇÃO]
         keyboardType="number-pad"
         value={cpf}
         onChangeText={setCpf}
@@ -68,6 +68,7 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
       <TextInput
         style={styles.input}
         placeholder={t.auth.passwordMinChars}
+        placeholderTextColor="#A0AEC0" // [CORREÇÃO]
         secureTextEntry
         value={password}
         onChangeText={setPassword}
@@ -95,7 +96,6 @@ export default function Signup({ navigation }: NativeStackScreenProps<RootStackP
   );
 }
 
-// Estilos
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -109,14 +109,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 20,
+    color: '#1A202C',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#E2E8F0',
     paddingHorizontal: 12,
     paddingVertical: 14,
     borderRadius: 10,
     fontSize: 16,
+    color: '#2D3748',
+    backgroundColor: '#F7FAFC', // Padronizado com Login
   },
   buttonPrimary: {
     backgroundColor: '#007AFF',

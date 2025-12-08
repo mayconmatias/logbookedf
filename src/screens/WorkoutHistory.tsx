@@ -74,7 +74,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     if (loading || !highlightId || isWorkoutShareModalVisible) return;
     const workoutToShare = workouts.find(w => w.id === highlightId);
     if (workoutToShare) {
-      // [RESTAURADO] Usando a função restaurada
       toggleExpand(highlightId); 
       navigation.setParams({ highlightWorkoutId: undefined });
     } 
@@ -128,7 +127,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
       });
 
       setWorkouts(historyItems);
-      // [RESTAURADO] Chamada da função restaurada
       processWorkoutsForMarking(historyItems);
     } catch (e: any) {
       Alert.alert("Erro ao buscar histórico", e.message);
@@ -137,7 +135,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     }
   };
 
-  // [RESTAURADO] Função de marcação no calendário
   const processWorkoutsForMarking = (workoutsData: WorkoutHistoryItem[]) => {
     const workoutsPerDay: { [date: string]: WorkoutHistoryItem[] } = {};
     workoutsData.forEach(workout => {
@@ -156,7 +153,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     setWorkoutMarkers(markers);
   };
   
-  // [RESTAURADO] useMemo do calendário
   const combinedMarkedDates = useMemo(() => {
     const newMarkedDates = { ...workoutMarkers };
     if (newMarkedDates[selectedDate]) {
@@ -167,7 +163,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     return newMarkedDates;
   }, [workoutMarkers, selectedDate]);
 
-  // [RESTAURADO] Função de expandir card
   const toggleExpand = (id: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedWorkoutIds(prev => {
@@ -181,7 +176,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     });
   };
 
-  // [RESTAURADO] Menu de opções
   const handleOpenWorkoutMenu = (workout: WorkoutHistoryItem) => {
     Alert.alert(
       `Opções do Treino`,
@@ -206,7 +200,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     );
   };
 
-  // [RESTAURADO] Deletar treino
   const handleDeleteWorkout = (workoutId: string) => {
     Alert.alert(
       "Deletar Treino",
@@ -237,12 +230,10 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     );
   };
 
-  // [RESTAURADO] Share Press
   const handleSharePress = (workout: WorkoutHistoryItem) => {
     openShareModal(workout);
   };
 
-  // [RESTAURADO] Abrir modal de share
   const openShareModal = async (workout: WorkoutHistoryItem) => {
     setIsFetchingPRs(true);
     setWorkoutToShare(workout); 
@@ -284,7 +275,6 @@ export default function WorkoutHistory({ navigation, route }: WorkoutHistoryProp
     }
   };
  
-  // [RESTAURADO] Fechar modal
   const closeWorkoutShareModal = () => {
     setIsWorkoutShareModalVisible(false);
     setWorkoutToShare(null);

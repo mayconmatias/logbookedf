@@ -12,10 +12,12 @@ const calculateSessionTEV = (
   );
   if (!exercise) return 0;
 
-  return exercise.sets.reduce(
-    (sum, set) => sum + (set.weight || 0) * (set.reps || 0),
-    0
-  );
+  return exercise.sets.reduce((sum, set) => {
+    // [NOVO] Ignora aquecimento no cálculo local
+    if (set.set_type === 'warmup') return sum;
+    
+    return sum + (set.weight || 0) * (set.reps || 0);
+  }, 0);
 };
 
 export const useShareFlows = (groupedWorkout: WorkoutExercise[]) => {
@@ -35,10 +37,8 @@ export const useShareFlows = (groupedWorkout: WorkoutExercise[]) => {
   const [isFetchingShareData, setIsFetchingShareData] = useState(false);
 
   // --- Modal de Série (PR ou normal) ---
-  // [CORREÇÃO AQUI]: Adicionado o 4º argumento 'sessionWorkoutId'
   const handleOpenSetShareModal = useCallback(
     (set: WorkoutSet, isPR: boolean, exerciseName: string, sessionWorkoutId: string | null) => {
-      // Injeta o ID da sessão no objeto do set para que o Modal possa excluí-lo da comparação histórica
       setSetToShare({ 
         ...set, 
         sessionWorkoutId: sessionWorkoutId || undefined 

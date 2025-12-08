@@ -17,7 +17,9 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Keyboard // [Importante para UX]
+  Keyboard,
+  ScrollView,
+  Image
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '@/types/navigation';
@@ -42,15 +44,31 @@ import t from '@/i18n/pt';
 import { useExerciseCatalog } from '@/hooks/useExerciseCatalog';
 import { WorkoutExercise } from '@/types/workout';
 
-// Formatador de data simples
+// [NOVO] Import do Player
+import VideoPlayerModal from '@/components/VideoPlayerModal';
+
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
   return `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear().toString().slice(2)}`;
 };
 
+const FilterChip = ({ label, isActive, onPress }: { label: string, isActive: boolean, onPress: () => void }) => (
+  <TouchableOpacity 
+    style={[
+      styles.chip, 
+      isActive && styles.chipActive 
+    ]} 
+    onPress={onPress}
+  >
+    <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+      {label}
+    </Text>
+  </TouchableOpacity>
+);
+
 interface QuickAddFormProps {
   definitionId: string;
-  lastSet?: ExerciseSetHistoryItem; // [NOVO] Recebe a última série para preencher
+  lastSet?: ExerciseSetHistoryItem; 
   onSetAdded: () => void;
 }
 
@@ -60,12 +78,10 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
   const [rpe, setRpe] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // [UX] Pré-preenche os campos quando o histórico carregar
   useEffect(() => {
     if (lastSet) {
       setWeight(lastSet.weight.toString());
       setReps(lastSet.reps.toString());
-      // RPE geralmente não salvamos no histórico simplificado, mas se tivesse, iria aqui
     }
   }, [lastSet]);
 
@@ -73,7 +89,7 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
     if (!weight || !reps) return Alert.alert(t.common.attention, 'Peso e Reps são obrigatórios.');
     
     setSaving(true);
-    Keyboard.dismiss(); // Baixa o teclado
+    Keyboard.dismiss(); 
 
     try {
       const todayWorkoutId = await getOrCreateTodayWorkoutId();
@@ -91,8 +107,6 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
         rpe: rpe ? parseFloat(rpe) : undefined,
       });
 
-      // Não limpamos os campos, mantemos a carga anterior para facilitar séries seguidas (Pirâmide)
-      // Apenas damos feedback visual
       Alert.alert('Sucesso', 'Série adicionada ao treino de hoje!'); 
       onSetAdded();
       
@@ -116,7 +130,7 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
             keyboardType="numeric" 
             value={weight} 
             onChangeText={setWeight}
-            selectTextOnFocus // Facilita edição
+            selectTextOnFocus
           />
         </View>
 
@@ -177,7 +191,6 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  // Pega o último item do histórico (assumindo que vem ordenado por data ASC do backend, o último é o mais recente)
   const lastSet = history.length > 0 ? history[history.length - 1] : undefined;
 
   return (
@@ -198,13 +211,12 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
          </View>
       </View>
 
-      {/* TABELA DE HISTÓRICO */}
       {loading ? <ActivityIndicator style={{ marginVertical: 20 }} /> : (
         <View style={styles.historyList}>
           {history.length === 0 ? (
             <Text style={styles.historyEmpty}>Nenhuma série registrada.</Text>
           ) : (
-            history.slice().reverse().slice(0, 5).map((item, index) => ( // Mostra apenas as últimas 5
+            history.slice().reverse().slice(0, 5).map((item, index) => (
               <View key={`history-${definitionId}-${index}`} style={styles.historyRow}>
                 <Text style={styles.colDate}>{formatDate(item.workout_date)}</Text>
                 <View style={styles.colData}>
@@ -217,11 +229,10 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
         </View>
       )}
 
-      {/* FORMULÁRIO COM PREENCHIMENTO AUTOMÁTICO */}
       <QuickAddForm 
         definitionId={definitionId} 
         onSetAdded={loadHistory} 
-        lastSet={lastSet} // Passamos a última série aqui
+        lastSet={lastSet} 
       />
     </View>
   );
@@ -232,7 +243,8 @@ type CatalogScreenProps = NativeStackScreenProps<RootStackParamList, 'ExerciseCa
 export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps) {
   const {
     loading, filteredExercises, handleCreateExercise, handleRenameExercise,
-    handleMergeExercises, handleDeleteExercise, searchTerm, setSearchTerm, loadCatalog
+    handleMergeExercises, handleDeleteExercise, searchTerm, setSearchTerm, loadCatalog,
+    availableTags, selectedTag, setSelectedTag
   } = useExerciseCatalog();
 
   const [expandedExercise, setExpandedExercise] = useState<string | null>(null);
@@ -243,6 +255,10 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
   const [editNotes, setEditNotes] = useState('');
   const [editVideo, setEditVideo] = useState('');
   const [savingInstructions, setSavingInstructions] = useState(false);
+
+  // [NOVO] Estados para o Video Player
+  const [videoModalVisible, setVideoModalVisible] = useState(false);
+  const [activeVideoUrl, setActiveVideoUrl] = useState('');
 
   const promptToCreateExercise = useCallback(async () => {
     Alert.prompt('Novo Exercício', 'Nome do exercício:', [
@@ -267,7 +283,6 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
     });
   }, [navigation, promptToCreateExercise]);
 
-  // ... (Handlers de edição e menu mantidos iguais) ...
   const handleEditInstructions = (item: CatalogExerciseItem) => {
     setEditingDefId(item.exercise_id);
     setEditNotes(item.default_notes || '');
@@ -312,6 +327,18 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
   };
 
   const handleOpenMenu = (item: CatalogExerciseItem) => {
+    if (item.is_system) {
+      Alert.alert(
+        'Exercício Oficial', 
+        'Este é um exercício padrão do sistema. Você pode adicionar suas próprias notas pessoais.',
+        [
+           { text: 'Editar Minhas Notas', onPress: () => handleEditInstructions(item) },
+           { text: 'Cancelar', style: 'cancel' }
+        ]
+      );
+      return;
+    }
+
     Alert.alert(`Opções para "${item.exercise_name_capitalized}"`, 'Escolha uma ação:', [
       { text: 'Editar Instruções', onPress: () => handleEditInstructions(item) },
       { text: 'Renomear', onPress: () => handleEditName(item.exercise_id, item.exercise_name_capitalized) },
@@ -320,11 +347,47 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
     ]);
   };
 
+  // [NOVO] Função para abrir vídeo
+  const handleWatchVideo = (url: string) => {
+    setActiveVideoUrl(url);
+    setVideoModalVisible(true);
+  };
+
   if (loading) return <View style={styles.centered}><ActivityIndicator size="large" /></View>;
 
   return (
     <View style={styles.container}>
-      <TextInput style={styles.searchInput} placeholder="Buscar exercício..." value={searchTerm} onChangeText={setSearchTerm} />
+      <TextInput 
+        style={styles.searchInput} 
+        placeholder="Buscar exercício..." 
+        placeholderTextColor="#A0AEC0"
+        value={searchTerm} 
+        onChangeText={setSearchTerm} 
+      />
+
+      {availableTags && availableTags.length > 0 && (
+        <View style={{ height: 50 }}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            contentContainerStyle={styles.chipsContainer}
+          >
+            <FilterChip 
+              label="Todos" 
+              isActive={selectedTag === null} 
+              onPress={() => setSelectedTag(null)} 
+            />
+            {availableTags.map((tag: string) => (
+              <FilterChip 
+                key={tag} 
+                label={tag} 
+                isActive={selectedTag === tag} 
+                onPress={() => setSelectedTag((prev: string | null) => prev === tag ? null : tag)} 
+              />
+            ))}
+          </ScrollView>
+        </View>
+      )}
       
       <FlatList
         data={filteredExercises}
@@ -337,10 +400,31 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
             <View style={[styles.cardContainer, isExpanded && styles.cardExpanded]}>
               <TouchableOpacity style={styles.card} onPress={() => setExpandedExercise(prev => prev === item.exercise_id ? null : item.exercise_id)}>
                 <View style={styles.cardContent}>
-                   <Text style={styles.cardTitle}>{item.exercise_name_capitalized}</Text>
+                   <View style={{flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap'}}>
+                     <Text style={styles.cardTitle}>{item.exercise_name_capitalized}</Text>
+                     
+                     {item.is_system && (
+                        <View style={styles.verifiedBadge}>
+                          <Feather name="check" size={10} color="#FFF" />
+                        </View>
+                     )}
+                   </View>
+                   
                    <Text style={styles.cardSubtitle}>
                       {item.total_sets > 0 ? `${item.total_sets} séries registradas` : 'Nunca realizado'}
                    </Text>
+                   
+                   {/* [NOVO] Botão de Vídeo direto no Card */}
+                   {item.video_url ? (
+                      <TouchableOpacity 
+                        style={styles.videoButton} 
+                        onPress={() => handleWatchVideo(item.video_url!)}
+                      >
+                        <Feather name="play-circle" size={14} color="#007AFF" />
+                        <Text style={styles.videoButtonText}>Ver Demo</Text>
+                      </TouchableOpacity>
+                   ) : null}
+
                 </View>
                 <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color="#A0AEC0" />
               </TouchableOpacity>
@@ -363,9 +447,9 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Instruções</Text>
             <Text style={styles.label}>Link de Vídeo</Text>
-            <TextInput style={styles.input} placeholder="https://..." value={editVideo} onChangeText={setEditVideo} autoCapitalize="none" />
+            <TextInput style={styles.input} placeholder="https://..." placeholderTextColor="#A0AEC0" value={editVideo} onChangeText={setEditVideo} autoCapitalize="none" />
             <Text style={styles.label}>Observações</Text>
-            <TextInput style={[styles.input, styles.textArea]} placeholder="Ex: Postura..." value={editNotes} onChangeText={setEditNotes} multiline />
+            <TextInput style={[styles.input, styles.textArea]} placeholder="Ex: Postura..." placeholderTextColor="#A0AEC0" value={editNotes} onChangeText={setEditNotes} multiline />
             <View style={styles.modalActions}>
               <TouchableOpacity style={[styles.btn, styles.btnCancel]} onPress={() => setIsInstructionModalVisible(false)}><Text style={styles.txtCancel}>Cancelar</Text></TouchableOpacity>
               <TouchableOpacity style={[styles.btn, styles.btnSave]} onPress={handleSaveInstructions} disabled={savingInstructions}>
@@ -376,6 +460,13 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* [NOVO] Player de Vídeo */}
+      <VideoPlayerModal 
+        visible={videoModalVisible}
+        videoUrl={activeVideoUrl}
+        onClose={() => setVideoModalVisible(false)}
+      />
+
       <ExerciseAnalyticsSheet ref={analyticsSheetRef} />
     </View>
   );
@@ -384,9 +475,15 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  searchInput: { height: 48, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, paddingHorizontal: 16, fontSize: 16, margin: 16, backgroundColor: '#F7FAFC' },
+  searchInput: { height: 48, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, paddingHorizontal: 16, fontSize: 16, margin: 16, backgroundColor: '#F7FAFC', color: '#2D3748' },
   emptyList: { textAlign: 'center', marginTop: 32, fontSize: 16, color: '#718096' },
   
+  chipsContainer: { paddingHorizontal: 16, gap: 8, alignItems: 'center', paddingBottom: 10 },
+  chip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: '#EDF2F7', borderWidth: 1, borderColor: '#E2E8F0' },
+  chipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  chipText: { fontSize: 13, fontWeight: '600', color: '#4A5568' },
+  chipTextActive: { color: '#FFF' },
+
   cardContainer: { backgroundColor: '#FFF', marginHorizontal: 16, marginBottom: 10, borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0' },
   cardExpanded: { borderColor: '#007AFF', borderWidth: 1 },
   card: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
@@ -394,8 +491,33 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: 'bold', color: '#2D3748' },
   cardSubtitle: { fontSize: 12, color: '#718096', marginTop: 2 },
 
+  verifiedBadge: {
+    backgroundColor: '#007AFF',
+    width: 16, height: 16,
+    borderRadius: 8,
+    justifyContent: 'center', alignItems: 'center',
+    marginTop: 2
+  },
+
+  // [NOVO] Estilo do botão de vídeo no card
+  videoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    backgroundColor: '#F0F9FF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6
+  },
+  videoButtonText: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '600',
+    marginLeft: 4
+  },
+
   ninhoContainer: { backgroundColor: '#F9FAFB', borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingBottom: 10 },
-  
   ninhoHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
   ninhoHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   ninhoHeaderTitle: { fontSize: 12, fontWeight: '600', color: '#718096', textTransform: 'uppercase', letterSpacing: 0.5 },
@@ -423,7 +545,7 @@ const styles = StyleSheet.create({
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
   modalContent: { backgroundColor: '#FFF', borderRadius: 12, padding: 20 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 8, color: '#2D3748' },
   modalSub: { fontSize: 13, color: '#718096', marginBottom: 16 },
   label: { fontSize: 14, fontWeight: '600', color: '#2D3748', marginBottom: 6 },
   textArea: { height: 80, textAlignVertical: 'top' },

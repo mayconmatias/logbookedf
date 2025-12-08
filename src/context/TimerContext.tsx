@@ -1,29 +1,32 @@
 import React, { createContext, useState, useEffect, useContext, useRef, useCallback } from 'react';
 import { Platform, Alert } from 'react-native';
-import * as Haptics from 'expo-haptics';
+//import * as Haptics from 'expo-haptics';
+import { triggerHaptic } from '@/utils/haptics';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { navigate } from '@/utils/navigationRef'; 
 
-// Configuração Segura de Notificações para Expo Go
+// [CORREÇÃO] Configuração Atualizada de Notificações
 try {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
+      // Mantemos o alert antigo por segurança em versões velhas do Android
       shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-      shouldShowBanner: true,
-      shouldShowList: true,
+      
+      // ADICIONAMOS ESTES DOIS NOVOS:
+      shouldShowAlert: true, // Mantemos por compatibilidade, mas o foco são os de baixo:
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true, // <--- NOVO: Substitui o alerta intrusivo no iOS
+    shouldShowList: true,
     }),
   });
 } catch (e) {
   console.log("Notifications handler skipped (Expo Go limitations)");
 }
 
-// [CORREÇÃO] Chave v2 para limpar cache antigo
 const PRESETS_KEY = '@timer_presets_v2';
-// [CORREÇÃO] 120s (2 min) é o primeiro item (índice 0)
 const DEFAULT_PRESETS = [120, 60, 90]; 
 
 interface TimerContextData {
@@ -148,11 +151,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [presets, activePresetIndex]);
 
   const triggerFinishFeedback = async () => {
-    if (Platform.OS !== 'web') {
-      try {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      } catch (e) {}
-    }
+    triggerHaptic('success');
   };
 
   const stopTimer = useCallback(() => {

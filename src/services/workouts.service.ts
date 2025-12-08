@@ -3,12 +3,15 @@ import { WorkoutExercise } from '@/types/workout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLocalYYYYMMDD } from '@/utils/date';
 
+// Importações necessárias para copiar os exercícios
+import { fetchPlannedExercises } from '@/services/workout_planning.service';
+import { instantiateTemplateInWorkout } from '@/services/exercises.service';
+
 const SESSION_KEY = '@sessionWorkoutId';
 
 /**
  * Busca ou cria uma sessão para HOJE.
- * [ATUALIZADO] Agora considera apenas sessões ABERTAS (ended_at IS NULL).
- * Se já houver um treino finalizado hoje, ele cria um NOVO.
+ * [ATUALIZADO] Agora instancia os exercícios se for um treino novo vindo de um Programa.
  */
 export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<string> => {
   const today = getLocalYYYYMMDD();
@@ -21,6 +24,7 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
   let plannedColumn = null;
 
   if (originId) {
+    // Verifica se o ID passado é de um 'planned_workout' (Programa)
     const { data: isPlanned } = await supabase
       .from('planned_workouts')
       .select('id')
@@ -30,11 +34,12 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
     if (isPlanned) {
       plannedColumn = originId;
     } else {
+      // Caso contrário, assume que é um template legado ou salvo pelo usuário
       templateColumn = originId;
     }
   }
 
-  // 2. Busca se já existe sessão ABERTA HOJE
+  // 2. Busca se já existe sessão ABERTA HOJE para este mesmo treino
   let query = supabase
     .from('workouts')
     .select('id')
@@ -47,7 +52,7 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
   } else if (templateColumn) {
     query = query.eq('template_id', templateColumn);
   } else {
-    // Treino Livre
+    // Treino Livre (sem origem definida)
     query = query.is('template_id', null).is('planned_workout_id', null);
   }
 
@@ -58,12 +63,13 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
 
   if (findError) throw findError;
   
+  // SE JÁ EXISTE UMA SESSÃO ABERTA, RETORNA ELA (Não duplica exercícios)
   if (existingWorkout) {
     await AsyncStorage.setItem(SESSION_KEY, existingWorkout.id);
     return existingWorkout.id;
   }
 
-  // 3. Cria novo se não achou sessão ABERTA
+  // 3. Cria novo treino se não achou sessão ABERTA
   const { data: newWorkout, error: createError } = await supabase
     .from('workouts')
     .insert({
@@ -77,6 +83,22 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
     .single();
 
   if (createError) throw createError;
+
+  // 4. [CORREÇÃO CRÍTICA] Se veio de um Programa, COPIAR os exercícios agora!
+  if (plannedColumn) {
+    try {
+      // Busca os exercícios planejados
+      const plannedExercises = await fetchPlannedExercises(plannedColumn);
+      
+      // Instancia eles dentro do treino recém-criado (Copia Definição + Séries/Reps/RPE alvo)
+      await instantiateTemplateInWorkout(newWorkout.id, plannedExercises);
+      
+    } catch (e) {
+      console.error("Erro ao instanciar exercícios do programa:", e);
+      // Não damos throw aqui para não travar a abertura da tela, 
+      // mas o usuário verá um treino vazio se isso falhar.
+    }
+  }
 
   await AsyncStorage.setItem(SESSION_KEY, newWorkout.id);
   return newWorkout.id;
@@ -154,4 +176,59 @@ export const fetchCurrentOpenSession = async () => {
   }
 
   return data; 
+};
+
+/**
+ * Busca os dias (índices 0-6) em que houve treino na semana atual.
+ * Usado para o WeeklyTracker da Home.
+ */
+export const fetchThisWeekWorkoutDays = async (): Promise<number[]> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  // [CORREÇÃO] Cálculo manual das datas locais para evitar UTC shift
+  const curr = new Date();
+  const currentDayIndex = curr.getDay(); // 0 (Dom) a 6 (Sáb)
+  
+  // Encontra o Domingo (Início da Semana)
+  const startOfWeek = new Date(curr);
+  startOfWeek.setDate(curr.getDate() - currentDayIndex);
+
+  // Encontra o Sábado (Fim da Semana)
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+  // Helper para formatar YYYY-MM-DD localmente
+  const formatLocal = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const firstDayStr = formatLocal(startOfWeek);
+  const lastDayStr = formatLocal(endOfWeek);
+
+  const { data, error } = await supabase
+    .from('workouts')
+    .select('workout_date')
+    .eq('user_id', user.id)
+    .gte('workout_date', firstDayStr)
+    .lte('workout_date', lastDayStr);
+
+  if (error) {
+    console.error("Erro ao buscar frequência:", error);
+    return [];
+  }
+
+  // Converte as datas string 'YYYY-MM-DD' para o índice do dia da semana
+  const days = data.map(row => {
+    const [y, m, d] = row.workout_date.split('-').map(Number);
+    // Cria a data localmente usando o construtor (mês é base 0)
+    const localDate = new Date(y, m - 1, d); 
+    return localDate.getDay();
+  });
+
+  // Remove duplicatas
+  return [...new Set(days)];
 };

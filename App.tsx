@@ -1,13 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, View, StyleSheet } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Session } from "@supabase/supabase-js";
 import "react-native-url-polyfill/auto";
+
+// [CORREÇÃO 1] O RootView deve envolver TUDO
 import { GestureHandlerRootView } from "react-native-gesture-handler";
+
 import * as Linking from 'expo-linking';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { registerRootComponent } from 'expo';
+
+import './src/i18n/index.ts';
 
 import { TimerProvider } from '@/context/TimerContext';
 import RestTimer from '@/components/RestTimer';
@@ -22,11 +27,17 @@ import type { RootStackParamList } from "@/types/navigation";
 
 import { navigationRef } from "@/utils/navigationRef";
 
+import { Toaster } from 'sonner-native';
+
+import DashboardScreen from "@/screens/DashboardScreen";
+
+// Telas de Autenticação
 import LoginCPF from "@/screens/LoginCPF";
 import Signup from "@/screens/Signup"; 
 import ForgotPassword from "@/screens/ForgotPassword";
 import ResetPassword from "@/screens/ResetPassword";
 
+// Telas Principais (Aluno)
 import Home from "@/screens/Home";
 import LogWorkout from "@/screens/LogWorkout";
 import WorkoutHistory from "@/screens/WorkoutHistory";
@@ -35,8 +46,10 @@ import ExerciseCatalogScreen from '@/screens/ExerciseCatalogScreen';
 import MyPrograms from '@/screens/MyPrograms';
 import MarketplaceScreen from '@/screens/MarketplaceScreen';
 
+// Telas do Treinador
 import CoachStudentsList from '@/screens/coach/CoachStudentsList';
 import CoachStudentDetails from '@/screens/coach/CoachStudentDetails';
+import CoachStudentPrograms from '@/screens/coach/CoachStudentPrograms';
 import CoachProgramDetails from '@/screens/coach/CoachProgramDetails';
 import CoachWorkoutEditor from '@/screens/coach/CoachWorkoutEditor';
 import CoachPaywallScreen from '@/screens/CoachPaywallScreen';
@@ -52,7 +65,6 @@ const linking = {
   },
 };
 
-// Safe Mode Notifications
 try {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -61,7 +73,6 @@ try {
       shouldSetBadge: false,
       shouldShowBanner: true,
       shouldShowList: true,
-      priority: Notifications.AndroidNotificationPriority.HIGH,
     }),
   });
 } catch (e) {}
@@ -75,66 +86,89 @@ export default function App() {
     ...Feather.font, 
   });
 
+  const extractParamsFromUrl = (url: string) => {
+    const params: { [key: string]: string } = {};
+    const regex = /[#?&]([^=#]+)=([^&#]*)/g;
+    let match;
+    while ((match = regex.exec(url))) {
+      params[match[1]] = decodeURIComponent(match[2]);
+    }
+    return params;
+  };
+
   useEffect(() => {
     (async () => {
       try {
         const { status } = await Notifications.getPermissionsAsync();
-        if (status !== 'granted') {
-          await Notifications.requestPermissionsAsync();
-        }
-      } catch (e) {
-        console.log("Notification permissions skipped (Expo Go)");
-      }
+        if (status !== 'granted') await Notifications.requestPermissionsAsync();
+      } catch (e) {}
     })();
   }, []);
 
-  // [CORREÇÃO] Tratamento robusto de sessão
   useEffect(() => {
     let mounted = true;
 
-    const initializeSession = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
+    const handleDeepLink = async (url: string | null) => {
+      if (!url) return;
 
-        if (mounted) {
-          setSession(data.session);
-        }
-      } catch (e: any) {
-        console.log("Sessão inválida ou expirada:", e.message);
-        await supabase.auth.signOut();
-        if (mounted) {
-          setSession(null);
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
+      if (url.includes('reset-password')) {
+        setIsPasswordRecovery(true);
+
+        const params = extractParamsFromUrl(url);
+        if (params.access_token && params.refresh_token) {
+          try {
+            const { error } = await supabase.auth.setSession({
+              access_token: params.access_token,
+              refresh_token: params.refresh_token,
+            });
+            if (error) console.log("Erro setSession link:", error.message);
+          } catch (err) {
+            console.log("Erro auth setSession:", err);
+          }
         }
       }
     };
 
-    initializeSession();
+    const initialize = async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        await handleDeepLink(initialUrl);
+
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        if (mounted) setSession(data.session);
+      } catch (e) {
+        console.log("Init error:", e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    initialize();
 
     const { data: sub } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
-        
-        // Se o evento for SIGNED_OUT, a sessão já vem nula, então isso cobre revogação
         setSession(session);
         
         if (event === 'PASSWORD_RECOVERY') {
           setIsPasswordRecovery(true);
-        } else if (event === 'SIGNED_OUT') {
+        } 
+        else if (event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
           setIsPasswordRecovery(false);
-        } else if (event === 'SIGNED_IN') {
-           setIsPasswordRecovery(false);
         }
       }
     );
 
+    const linkingSub = Linking.addEventListener('url', ({ url }) => {
+      handleDeepLink(url);
+    });
+
     return () => {
       mounted = false;
       sub.subscription.unsubscribe();
+      linkingSub.remove();
     };
   }, []);
 
@@ -147,52 +181,66 @@ export default function App() {
   }
 
   return (
-    <SafeAreaProvider>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <TimerProvider>
-          <BiometricGate sessionActive={!!session}>
-            <NavigationContainer linking={linking} ref={navigationRef}>
-              {session ? (
-                 isPasswordRecovery ? (
-                    <Stack.Navigator>
-                      <Stack.Screen name="ResetPassword" component={ResetPassword} options={{ title: 'Redefinir Senha' }} />
-                    </Stack.Navigator>
-                 ) : (
-                    <Stack.Navigator 
-                      screenOptions={{
-                        headerBackTitle: 'Voltar', 
-                        headerTintColor: '#007AFF' 
-                      }}
-                    >
-                      <Stack.Screen name="Home" component={Home} options={{ title: "Logbook EdF" }} />
-                      <Stack.Screen name="LogWorkout" component={LogWorkout} options={{ title: "Registrar Treino", headerBackTitle: "Voltar" }} />
-                      <Stack.Screen name="WorkoutHistory" component={WorkoutHistory} options={{ title: "Histórico" }} />
-                      <Stack.Screen name="ExerciseCatalog" component={ExerciseCatalogScreen} options={{ title: 'Meus Exercícios' }} />
-                      <Stack.Screen name="MyPrograms" component={MyPrograms} options={{ title: 'Meus Programas' }} />
-                      <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Meu Perfil' }} />
-                      <Stack.Screen name="Marketplace" component={MarketplaceScreen} options={{ title: 'Loja de Programas' }} />
-                      
-                      <Stack.Screen name="CoachPaywall" component={CoachPaywallScreen} options={{ title: 'Seja PRO', presentation: 'modal' }} />
-                      <Stack.Screen name="CoachStudentsList" component={CoachStudentsList} options={{ title: 'Área do Treinador' }} />
-                      <Stack.Screen name="CoachStudentDetails" component={CoachStudentDetails} options={{ title: 'Detalhes do Aluno' }} />
-                      <Stack.Screen name="CoachProgramDetails" component={CoachProgramDetails} options={{ title: 'Dias de Treino' }} />
-                      <Stack.Screen name="CoachWorkoutEditor" component={CoachWorkoutEditor} options={{ title: 'Editar Treino' }} />
-                    </Stack.Navigator>
-                 )
-              ) : (
-                <Stack.Navigator initialRouteName="LoginCPF">
-                  <Stack.Screen name="LoginCPF" component={LoginCPF} options={{ title: "Login" }} />
-                  <Stack.Screen name="Signup" component={Signup} options={{ title: "Criar conta" }} />
-                  <Stack.Screen name="ForgotPassword" component={ForgotPassword} options={{ title: "Recuperar Senha" }} />
-                </Stack.Navigator>
-              )}
-            </NavigationContainer>
+    // [CORREÇÃO 2] GestureHandlerRootView aqui, como PAI da aplicação inteira
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+          <TimerProvider>
+            <BiometricGate sessionActive={!!session && !isPasswordRecovery}>
+              <NavigationContainer linking={linking} ref={navigationRef}>
+                {session ? (
+                   isPasswordRecovery ? (
+                      <Stack.Navigator>
+                        <Stack.Screen 
+                          name="ResetPassword" 
+                          component={ResetPassword} 
+                          options={{ 
+                            title: 'Criar Nova Senha',
+                            headerLeft: () => null 
+                          }} 
+                        />
+                      </Stack.Navigator>
+                   ) : (
+                      <Stack.Navigator 
+                        screenOptions={{
+                          headerBackTitle: 'Voltar', 
+                          headerTintColor: '#007AFF' 
+                        }}
+                      >
+                        <Stack.Screen name="Home" component={Home} options={{ title: "Logbook EdF" }} />
+                        <Stack.Screen name="LogWorkout" component={LogWorkout} options={{ title: "Registrar Treino", headerBackTitle: "Voltar" }} />
+                        <Stack.Screen name="WorkoutHistory" component={WorkoutHistory} options={{ title: "Histórico" }} />
+                        <Stack.Screen name="ExerciseCatalog" component={ExerciseCatalogScreen} options={{ title: 'Meus Exercícios' }} />
+                        <Stack.Screen name="MyPrograms" component={MyPrograms} options={{ title: 'Meus Programas' }} />
+                        <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Meu Perfil' }} />
+                        <Stack.Screen name="Marketplace" component={MarketplaceScreen} options={{ title: 'Loja de Programas' }} />
+                        
+                        <Stack.Screen name="CoachPaywall" component={CoachPaywallScreen} options={{ title: 'Seja PRO', presentation: 'modal' }} />
+                        <Stack.Screen name="CoachStudentsList" component={CoachStudentsList} options={{ title: 'Área do Treinador' }} />
+                        <Stack.Screen name="CoachStudentDetails" component={CoachStudentDetails} options={{ title: 'Detalhes do Aluno' }} />
+                        
+                        <Stack.Screen name="Dashboard" component={DashboardScreen} />
+
+                        <Stack.Screen name="CoachStudentPrograms" component={CoachStudentPrograms} options={{ title: 'Programas do Aluno' }} />
+                        <Stack.Screen name="CoachProgramDetails" component={CoachProgramDetails} options={{ title: 'Dias de Treino' }} />
+                        <Stack.Screen name="CoachWorkoutEditor" component={CoachWorkoutEditor} options={{ title: 'Editar Treino' }} />
+                      </Stack.Navigator>
+                   )
+                ) : (
+                  <Stack.Navigator initialRouteName="LoginCPF">
+                    <Stack.Screen name="LoginCPF" component={LoginCPF} options={{ title: "Login" }} />
+                    <Stack.Screen name="Signup" component={Signup} options={{ title: "Criar conta" }} />
+                    <Stack.Screen name="ForgotPassword" component={ForgotPassword} options={{ title: "Recuperar Senha" }} />
+                  </Stack.Navigator>
+                )}
+              </NavigationContainer>
+              
+              {/* Timer e Toaster precisam estar dentro do GestureHandlerRootView */}
+              {session && !isPasswordRecovery && <RestTimer />}
+              <Toaster />
+            </BiometricGate>
             
-            {session && <RestTimer />}
-          </BiometricGate>
-          
-        </TimerProvider>
-      </GestureHandlerRootView>
-    </SafeAreaProvider>
+          </TimerProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

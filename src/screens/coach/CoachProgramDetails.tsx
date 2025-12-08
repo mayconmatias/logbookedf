@@ -7,10 +7,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Modal,                // <--- NOVO
-  TextInput,            // <--- NOVO
-  KeyboardAvoidingView, // <--- NOVO
-  Platform              // <--- NOVO
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
@@ -19,7 +19,8 @@ import { PlannedWorkout } from '@/types/coaching';
 import { 
   fetchPlannedWorkouts, 
   createPlannedWorkout, 
-  deletePlannedWorkout 
+  deletePlannedWorkout,
+  renamePlannedWorkout // <--- Função importada
 } from '@/services/workout_planning.service';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CoachProgramDetails'>;
@@ -55,18 +56,16 @@ export default function CoachProgramDetails({ navigation, route }: Props) {
     });
   }, [navigation, program]);
 
-  // Abre o modal limpo
   const handleOpenModal = () => {
     setWorkoutName('');
     setIsModalVisible(true);
   };
 
-  // Cria de fato
   const handleCreate = async () => {
     if (!workoutName.trim()) return;
     setCreating(true);
     try {
-      setLoading(true); // Mostra loading na lista atrás
+      setLoading(true);
       await createPlannedWorkout(program.id, workoutName, workouts.length);
       setIsModalVisible(false);
       loadWorkouts();
@@ -78,8 +77,34 @@ export default function CoachProgramDetails({ navigation, route }: Props) {
     }
   };
 
+  const handleRename = (id: string, currentName: string) => {
+    Alert.prompt(
+      'Renomear Treino',
+      'Digite o novo nome:',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Salvar',
+          onPress: async (newName?: string) => {
+            if (!newName || !newName.trim()) return;
+            try {
+              setLoading(true);
+              await renamePlannedWorkout(id, newName);
+              loadWorkouts();
+            } catch (e: any) {
+              Alert.alert('Erro', e.message);
+              setLoading(false);
+            }
+          }
+        }
+      ],
+      'plain-text',
+      currentName
+    );
+  };
+
   const handleDelete = (id: string) => {
-    Alert.alert('Deletar', 'Tem certeza?', [
+    Alert.alert('Deletar', 'Tem certeza que deseja remover este dia de treino?', [
       { text: 'Cancelar', style: 'cancel' },
       { 
         text: 'Deletar', 
@@ -96,18 +121,32 @@ export default function CoachProgramDetails({ navigation, route }: Props) {
     ]);
   };
 
+  const handleOptions = (item: PlannedWorkout) => {
+    Alert.alert(
+      item.name,
+      'O que deseja fazer?',
+      [
+        { text: 'Renomear', onPress: () => handleRename(item.id, item.name) },
+        { text: 'Deletar', onPress: () => handleDelete(item.id), style: 'destructive' },
+        { text: 'Cancelar', style: 'cancel' }
+      ]
+    );
+  };
+
   const renderItem = ({ item }: { item: PlannedWorkout }) => (
     <TouchableOpacity
       style={styles.card}
       onPress={() => navigation.navigate('CoachWorkoutEditor', { workout: item })}
-      onLongPress={() => handleDelete(item.id)}
+      onLongPress={() => handleOptions(item)} // <--- Menu de opções
+      delayLongPress={400}
+      activeOpacity={0.7}
     >
       <View style={styles.iconBox}>
         <Text style={styles.letter}>{item.name.charAt(0).toUpperCase()}</Text>
       </View>
       <View style={styles.info}>
         <Text style={styles.name}>{item.name}</Text>
-        <Text style={styles.subtext}>Toque para adicionar exercícios</Text>
+        <Text style={styles.subtext}>Toque para editar • Segure para opções</Text>
       </View>
       <Feather name="chevron-right" size={20} color="#CBD5E0" />
     </TouchableOpacity>
@@ -117,7 +156,7 @@ export default function CoachProgramDetails({ navigation, route }: Props) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.description}>
-          Adicione os dias de treino para este bloco. O aluno verá estes treinos na Home.
+          Gerencie os dias de treino deste programa. Segure o dedo em um treino para renomear ou excluir.
         </Text>
       </View>
 
@@ -250,7 +289,6 @@ const styles = StyleSheet.create({
   },
   fabText: { color: '#FFF', fontWeight: 'bold', marginLeft: 8 },
 
-  // Estilos do Modal (Reaproveitados para manter padrão)
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

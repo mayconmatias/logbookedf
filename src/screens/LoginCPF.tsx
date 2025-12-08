@@ -48,6 +48,7 @@ export default function LoginCPF({ navigation }: NativeStackScreenProps<RootStac
       <TextInput
         style={styles.input}
         placeholder={t.auth.cpfPlaceholder}
+        placeholderTextColor="#A0AEC0" // [CORREÇÃO] Cor explícita
         keyboardType="number-pad"
         value={cpf}
         onChangeText={setCpf}
@@ -55,6 +56,7 @@ export default function LoginCPF({ navigation }: NativeStackScreenProps<RootStac
       <TextInput
         style={styles.input}
         placeholder={t.auth.passwordPlaceholder}
+        placeholderTextColor="#A0AEC0" // [CORREÇÃO] Cor explícita
         secureTextEntry
         value={password}
         onChangeText={setPassword}
@@ -147,16 +149,14 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     backgroundColor: '#A9A9A9',
   },
-  
-  // Estilos do Link de Texto
   linkContainer: {
-    marginTop: 24, // Espaço maior para separar dos botões
+    marginTop: 24, 
     alignItems: 'center',
     padding: 8,
   },
   linkText: {
-    color: '#718096', // Cinza discreto
+    color: '#718096', 
     fontSize: 14,
-    textDecorationLine: 'underline', // Opcional: sublinhado para indicar clique
+    textDecorationLine: 'underline',
   },
 });

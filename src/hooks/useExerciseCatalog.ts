@@ -1,4 +1,3 @@
-// src/hooks/useExerciseCatalog.ts
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Alert } from 'react-native';
 import {
@@ -13,10 +12,12 @@ import t from '@/i18n/pt';
 
 export const useExerciseCatalog = () => {
   const [loading, setLoading] = useState(true);
-  const [allExercises, setAllExercises] = useState<CatalogExerciseItem[]>([]); // <--- INICIALIZADO AQUI
+  const [allExercises, setAllExercises] = useState<CatalogExerciseItem[]>([]); 
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Estado para controlar a tag selecionada (null = Todos)
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
-  // 1. FUNÇÃO DE BUSCA CENTRALIZADA
   const loadCatalog = useCallback(async () => {
     try {
       const data = await fetchUniqueExerciseCatalog();
@@ -29,15 +30,16 @@ export const useExerciseCatalog = () => {
     }
   }, []);
 
-  // 2. BUSCA INICIAL
   useEffect(() => {
     loadCatalog();
   }, [loadCatalog]);
 
-  // 3. FUNÇÃO DE CRIAÇÃO
-  const handleCreateExercise = async (newExerciseName: string) => {
+  const handleCreateExercise = async (
+    newExerciseName: string, 
+    options?: { silent?: boolean }
+  ) => {
     if (!newExerciseName || newExerciseName.trim() === '') {
-      Alert.alert(t.common.error, 'O nome não pode ficar em branco.');
+      Alert.alert(t.common.attention, 'O nome não pode ficar em branco.');
       return null;
     }
 
@@ -53,18 +55,21 @@ export const useExerciseCatalog = () => {
         'Exercício já existe',
         `"${nameTrimmed}" já está no seu catálogo.`
       );
-      return null;
+      return existingExercise; 
     }
 
     try {
       const newDefinition = await createExerciseDefinition(nameTrimmed);
-      Alert.alert('Sucesso', `"${nameTrimmed}" foi adicionado ao catálogo!`);
+      
+      if (!options?.silent) {
+        Alert.alert('Sucesso', `"${nameTrimmed}" foi adicionado ao catálogo!`);
+      }
 
       const freshCatalog = await loadCatalog();
       setSearchTerm(''); 
 
       return freshCatalog?.find(
-        (ex) => ex.exercise_id === newDefinition.id // (O service retorna 'id' da definição)
+        (ex) => ex.exercise_id === newDefinition.id 
       );
     } catch (e: any) {
       Alert.alert('Erro ao Salvar', e.message);
@@ -72,11 +77,7 @@ export const useExerciseCatalog = () => {
     }
   };
 
-  // 4. FUNÇÕES DE GERENCIAMENTO
-  const handleRenameExercise = async (
-    definitionId: string,
-    newName: string
-  ) => {
+  const handleRenameExercise = async (definitionId: string, newName: string) => {
     try {
       await renameExercise(definitionId, newName);
       Alert.alert('Sucesso', 'Exercício renomeado!');
@@ -88,10 +89,7 @@ export const useExerciseCatalog = () => {
     }
   };
 
-  const handleMergeExercises = async (
-    oldDefinitionId: string,
-    targetDefinitionId: string
-  ) => {
+  const handleMergeExercises = async (oldDefinitionId: string, targetDefinitionId: string) => {
     try {
       await mergeExercises(oldDefinitionId, targetDefinitionId);
       Alert.alert('Sucesso', 'Exercícios mesclados!');
@@ -103,10 +101,7 @@ export const useExerciseCatalog = () => {
     }
   };
 
-  const handleDeleteExercise = async (
-    definitionId: string,
-    nameCapitalized: string
-  ) => {
+  const handleDeleteExercise = async (definitionId: string, nameCapitalized: string) => {
     try {
       await deleteExerciseHistory(definitionId);
       Alert.alert('Sucesso', `"${nameCapitalized}" foi apagado.`);
@@ -118,24 +113,57 @@ export const useExerciseCatalog = () => {
     }
   };
 
-  // 5. LISTAS MEMORIZADAS
+  // [ATUALIZADO] Gera lista de filtros baseada nos Pacotes Comprados
+  const availableTags = useMemo(() => {
+    const tagsSet = new Set<string>();
+    
+    // Varre todos os exercícios para encontrar tags existentes (Pacotes)
+    allExercises.forEach(ex => {
+      if (ex.tags && Array.isArray(ex.tags)) {
+        ex.tags.forEach(tag => tagsSet.add(tag));
+      }
+    });
+
+    const sortedPacks = Array.from(tagsSet).sort();
+
+    // Sempre adiciona "Meus" para exercícios manuais (sem tag)
+    return ['Meus', ...sortedPacks];
+  }, [allExercises]);
+
+  // [ATUALIZADO] Lógica de filtragem por Pacote
   const filteredExercises = useMemo(() => {
-    if (!searchTerm) return allExercises;
-    return allExercises.filter((ex) =>
-      ex.exercise_name_lowercase.includes(searchTerm.toLowerCase())
-    );
-  }, [allExercises, searchTerm]);
+    let result = allExercises;
+
+    // 1. Filtro por Tag (Pacote)
+    if (selectedTag) {
+      if (selectedTag === 'Meus') {
+        // Mostra exercícios que NÃO têm tags (criados manualmente)
+        result = result.filter(ex => !ex.tags || ex.tags.length === 0);
+      } else {
+        // Mostra exercícios que têm a tag específica do pacote
+        result = result.filter(ex => ex.tags && ex.tags.includes(selectedTag));
+      }
+    }
+
+    // 2. Filtro por Texto (Busca)
+    if (searchTerm) {
+      result = result.filter((ex) =>
+        ex.exercise_name_lowercase.includes(searchTerm.toLowerCase())
+      );
+    }
+
+    return result;
+  }, [allExercises, searchTerm, selectedTag]);
 
   const allExerciseNames = useMemo(() => {
     return allExercises.map((ex) => ex.exercise_name_capitalized);
   }, [allExercises]);
 
-  // 6. RETORNO (O PONTO IMPORTANTE)
   return {
     loading,
-    allExercises, // <--- Esta linha é crucial para o 'LogWorkout.tsx'
+    allExercises, 
     filteredExercises,
-    allExerciseNames, // Esta linha é usada pelo 'WorkoutForm'
+    allExerciseNames, 
     loadCatalog,
     handleCreateExercise,
     handleRenameExercise,
@@ -143,5 +171,8 @@ export const useExerciseCatalog = () => {
     handleDeleteExercise,
     searchTerm,
     setSearchTerm,
+    availableTags,
+    selectedTag,
+    setSelectedTag
   };
 };

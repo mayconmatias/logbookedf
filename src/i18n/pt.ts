@@ -1,8 +1,4 @@
-/**
- * Objeto de internacionalização (i18n) para Português (pt-BR).
- */
 const t = {
-  // Strings comuns usadas em múltiplos locais
   common: {
     attention: 'Atenção',
     error: 'Erro',
@@ -20,11 +16,8 @@ const t = {
     yesAddOneMore: 'Sim, mais uma',
     unauthorized: 'Usuário não encontrado',
   },
-
-  // ===================================================================
-  // [NOVO] Strings de Autenticação (Login, Cadastro)
-  // ===================================================================
   auth: {
+    // ... (Mantenha o que já existia) ...
     loginTitle: 'Entrar com CPF e senha',
     loginButton: 'Entrar',
     loginButtonLoading: 'Entrando...',
@@ -41,18 +34,15 @@ const t = {
     errorLogin: 'Falha no login',
     errorSignup: 'Erro no cadastro',
     errorSignupMessage: 'Não foi possível criar a conta.',
-    errorEmailNotConfirmed: 'Seu e-mail ainda não foi verificado. Por favor, cheque sua caixa de entrada.',
+    errorEmailNotConfirmed: 'Seu e-mail ainda não foi verificado.',
     errorCpfNotFound: 'CPF não encontrado',
     validationFields: 'Preencha todos os campos.',
-    validationCpf: 'O CPF informado é inválido.', // <-- A nova string
+    validationCpf: 'O CPF informado é inválido.',
     signupSuccessTitle: 'Cadastro enviado!',
-    signupSuccessBody: 'Enviamos um link de confirmação para o seu e-mail. Por favor, verifique sua caixa de entrada para ativar sua conta.',
+    signupSuccessBody: 'Enviamos um link de confirmação para o seu e-mail.',
   },
-  // ===================================================================
-
-  // Strings específicas do LogWorkout
   logWorkout: {
-    // ... (Seção logWorkout inalterada)
+    // ... (Mantenha o que já existia) ...
     deleteSetTitle: 'Deletar Série',
     deleteExerciseTitle: 'Deletar Exercício',
     templateCompleteTitle: 'Template Concluído!',
@@ -81,42 +71,10 @@ const t = {
     addExerciseButton: 'Fazer mais um exercício',
     menuSkipToExercise: 'Pular para este exercício',
     menuReuseExercise: 'Re-usar nome no formulário',
+    yesAddOneMore: 'Sim, mais uma', 
   },
-
-  // Strings do CreateTemplateScreen
-  createTemplate: {
-    // ... (Seção createTemplate inalterada)
-    titleNew: 'Criar Novo Template',
-    titleEdit: 'Editar Template',
-    templateName: 'Nome do treino',
-    templateNamePlaceholder: 'Ex: Treino A - Peito e Tríceps',
-    notes: 'Notas (opcional)',
-    notesPlaceholder: 'Ex: Focar na cadência, 3 min de descanso...',
-    exercises: 'Exercícios',
-    exercise: 'Exercício',
-    exerciseName: 'Nome do Exercício',
-    exerciseNamePlaceholder: 'Ex: Supino Reto',
-    sets: 'Séries',
-    setsPlaceholder: 'Ex: 3',
-    reps: 'Reps',
-    repsPlaceholder: 'Ex: 6-10',
-    observation: 'Observação (opcional)',
-    observationPlaceholder: 'Ex: Controlar a descida',
-    unilateral: 'Exercício Unilateral',
-    addExercise: 'Adicionar Exercício',
-    saveTemplate: 'Salvar Template',
-    updateTemplate: 'Atualizar Template',
-    nameRequired: 'O nome do treino é obrigatório.',
-    exerciseRequired: 'Adicione pelo menos um exercício ao template.',
-    exerciseFieldsRequired:
-      'Preencha o nome e o número de séries de pelo menos um exercício.',
-    saveSuccess: 'Template salvo!',
-    updateSuccess: 'Template atualizado!',
-  },
-
-  // Strings do AnalyticsSheet
   analytics: {
-    // ... (Seção analytics inalterada)
+    // ... (Mantenha o que já existia) ...
     title: 'Analytics',
     subtitle: 'Progressão do Exercício',
     loading: 'Buscando seu progresso...',
@@ -141,6 +99,39 @@ const t = {
     historyTitle: 'Seus Recordes (PRs)',
     historyNoData: 'Nenhum recorde encontrado.',
   },
+  // --- NOVOS CAMPOS PARA O DASHBOARD ---
+  dashboard: {
+    title: 'Hub de Performance',
+    subtitle: 'Métricas e consistência.',
+    avgDuration: 'Duração Média',
+    setsPerSession: 'Séries/Treino',
+    actualRest: 'Descanso Real',
+    weeklyVolume: 'Volume Semanal',
+    setsDone: 'Séries Realizadas',
+    groups: 'Grupos',
+    exercises: 'Exercícios',
+    historicalAvg: 'Média Histórica',
+    thisWeek: 'Esta Semana',
+    noDataChart: 'Sem dados suficientes.',
+    noDataChartSub: 'Registre seus treinos para visualizar.',
+    filterNormal: 'Normais',
+    filterAdvanced: 'Avançadas',
+    filterWarmup: 'Aquec.',
+    loadEvolution: 'Evolução de Carga',
+    trendOf: 'Tendência de',
+    totalVolume: 'Volume Total',
+    density: 'Densidade',
+    byWeek: 'Por Semana',
+    bySession: 'Por Sessão',
+    catalogMaintenance: 'Manutenção de Catálogo',
+    processing: 'Processando...',
+    checkinTitle: 'Check-in Diário',
+    checkinSub: 'Registre como você está se sentindo hoje.',
+    stateLabel: 'SEU ESTADO HOJE',
+    stateHigh: 'Alta Capacidade',
+    stateModerate: 'Estado Moderado',
+    stateRecovery: 'Recuperação Necessária',
+  }
 };
 
 export default t;

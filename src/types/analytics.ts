@@ -25,7 +25,11 @@ export interface ExerciseAnalyticsData {
   historicalPRsList: HistoricalSet[];
   chartDataE1RM: ChartDataPoint[];
   chartDataAccumulatedVolume: ChartDataPoint[];
-  calendarData: CalendarDay[]; 
+  calendarData: CalendarDay[];
+
+  // [CORREÇÃO] Adicionando os campos opcionais para o Growth Hack de validação
+  is_verified?: boolean;
+  tags?: string[];
 }
 
 export interface CurrentBestSet {
@@ -35,7 +39,7 @@ export interface CurrentBestSet {
   definitionId: string; 
 }
 
-// [NOVO] Tipo direto da tabela exercise_statistics
+// Tipo direto da tabela exercise_statistics
 export interface ExerciseStats {
   definition_id: string;
   max_weight: number;

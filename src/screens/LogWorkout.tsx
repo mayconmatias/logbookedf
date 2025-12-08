@@ -1,10 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useMemo,
-  useCallback,
-} from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,660 +9,281 @@ import {
   KeyboardAvoidingView,
   Platform,
   Linking,
-  Keyboard
+  Keyboard,
+  Modal,
+  TextInput,
+  LayoutAnimation,
+  UIManager
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage'; 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useDebounce } from 'use-debounce';
 import * as Haptics from 'expo-haptics';
-import DraggableFlatList, { 
-  RenderItemParams, 
-  ScaleDecorator 
+import DraggableFlatList, {
+  RenderItemParams,
 } from 'react-native-draggable-flatlist';
+import { Feather } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 
 import t from '@/i18n/pt';
 import type { RootStackParamList } from '@/types/navigation';
 import { WorkoutExercise, WorkoutSet } from '@/types/workout';
-import { PlannedExercise } from '@/types/coaching';
-import { CurrentBestSet } from '@/types/analytics'; // [NOVO] Import do tipo
-import { fetchPlannedExercises } from '@/services/workout_planning.service';
 
-import WorkoutForm, { WorkoutFormProps } from '@/components/WorkoutForm';
+// Componentes
+import { WorkoutForm, WorkoutFormProps } from '@/components/WorkoutForm'; 
 import ExerciseCard from '@/components/ExerciseCard';
-import {
-  ExerciseAnalyticsSheet,
-  ExerciseAnalyticsSheetRef,
-} from '@/components/ExerciseAnalyticsSheet';
+import { ExerciseAnalyticsSheet, ExerciseAnalyticsSheetRef } from '@/components/ExerciseAnalyticsSheet'; 
+
 import SetShareModal from '@/components/SetShareModal';
 import ProgressionShareModal from '@/components/ProgressionShareModal';
+import VideoPlayerModal from '@/components/VideoPlayerModal';
 
-import { useWorkoutSession } from '@/hooks/useWorkoutSession';
-import { useExerciseCatalog } from '@/hooks/useExerciseCatalog';
-import { usePerformancePeek } from '@/hooks/usePerformancePeek';
+// Hooks e Contexto
+import { useLogWorkoutController } from '@/hooks/useLogWorkoutController';
 import { useShareFlows } from '@/hooks/useShareFlows';
 import { useTimer } from '@/context/TimerContext';
-
-import {
-  getOrCreateExerciseInWorkout,
-  saveSet,
-  deleteSet,
-  deleteExercise,
-  updateSet,
-  reorderWorkoutExercises,
-} from '@/services/exercises.service';
-import { fetchAndGroupWorkoutData } from '@/services/workouts.service'; 
+import { supabase } from '@/lib/supabaseClient';
+import { updateExerciseInstructions } from '@/services/exercises.service';
 import { calculateE1RM, LBS_TO_KG_FACTOR } from '@/utils/e1rm';
-import { classifyPR } from '@/services/records.service';
 
-const DRAFT_KEY = '@log_workout_draft';
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutLayoutAnimationEnabledExperimental(true);
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'LogWorkout'>;
 
 export default function LogWorkoutScreen({ navigation, route }: Props) {
-  const { workoutId: paramWorkoutId, templateId: paramTemplateId } = route.params || {};
+  const { t } = useTranslation();
+  const controller = useLogWorkoutController(route.params || {}, navigation);
   const { startTimer } = useTimer();
 
   const {
-    loading,
-    sessionWorkoutId,
-    groupedWorkout,
-    setGroupedWorkout,
-    finishWorkout,
-  } = useWorkoutSession(paramWorkoutId, paramTemplateId);
+    isSetShareModalVisible, isProgressionShareModalVisible, setToshare,
+    isSharingPR, exerciseNameToShare, progressionDataForModal, currentSessionTEV,
+    isFetchingShareData, handleOpenSetShareModal, handleCloseSetShareModal,
+    handleOpenProgressionShareModal, handleCloseProgressionShareModal,
+  } = useShareFlows(controller.session.groupedWorkout);
 
-  const {
-    allExercises: allExerciseDefinitions,
-    allExerciseNames,
-    handleCreateExercise: handleCreateDefinition,
-  } = useExerciseCatalog();
+  const [isInstructionModalVisible, setIsInstructionModalVisible] = useState(false);
+  const [instructionNote, setInstructionNote] = useState('');
+  const [instructionVideo, setInstructionVideo] = useState('');
+  const [loadingInstructions, setLoadingInstructions] = useState(false);
+  const [savingInstructions, setSavingInstructions] = useState(false);
 
-  const {
-    loadingStats,
-    exerciseStats,
-    fetchQuickStats,
-    invalidateCache,
-    clearPeek,
-  } = usePerformancePeek();
+  const [videoModalVisible, setVideoModalVisible] = useState(false);
+  const [activeVideoUrl, setActiveVideoUrl] = useState('');
 
-  const {
-    isSetShareModalVisible,
-    isProgressionShareModalVisible,
-    setToshare,
-    isSharingPR,
-    exerciseNameToShare,
-    progressionDataForModal,
-    currentSessionTEV,
-    isFetchingShareData,
-    handleOpenSetShareModal,
-    handleCloseSetShareModal,
-    handleOpenProgressionShareModal,
-    handleCloseProgressionShareModal,
-  } = useShareFlows(groupedWorkout);
-
-  const [definitionIdToShare, setDefinitionIdToShare] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [inputUnit, setInputUnit] = useState<'kg' | 'lbs'>('kg');
-  
-  const [exerciseName, setExerciseName] = useState('');
-  const [currentDefinitionId, setCurrentDefinitionId] = useState<string | null>(null);
-  const [weight, setWeight] = useState('');
-  const [reps, setReps] = useState('');
-  const [rpe, setRpe] = useState('');
-  const [observations, setObservations] = useState('');
-  const [baseObservation, setBaseObservation] = useState('');
-  const [isUnilateral, setIsUnilateral] = useState(false);
-  const [side, setSide] = useState<'E' | 'D' | null>(null);
-  const [isAutocompleteFocused, setIsAutocompleteFocused] = useState(false);
-  
-  const [prSetIds, setPrSetIds] = useState<Set<string>>(new Set());
-  const [prescriptions, setPrescriptions] = useState<Record<string, PlannedExercise>>({});
-  const [loadingPrescription, setLoadingPrescription] = useState(false);
-  
-  const [editingSetId, setEditingSetId] = useState<string | null>(null);
-  const [isReordering, setIsReordering] = useState(false);
-
-  const currentPlan = currentDefinitionId ? prescriptions[currentDefinitionId] : null;
   const analyticsSheetRef = useRef<ExerciseAnalyticsSheetRef>(null);
-  const [debouncedExerciseName] = useDebounce(exerciseName, 500);
-
-  // --- [NOVO] Helper para encontrar a melhor série da sessão atual ---
-  const getBestSetForDefinition = useCallback((defId: string): CurrentBestSet | null => {
-    const exercise = groupedWorkout.find(ex => ex.definition_id === defId);
-    if (!exercise || !exercise.sets || exercise.sets.length === 0) return null;
-
-    let best: CurrentBestSet | null = null;
-    let maxE1RM = -1;
-
-    exercise.sets.forEach(set => {
-      // Ignora ghost sets
-      if (set.weight > 0 && set.reps > 0) {
-        const val = calculateE1RM(set.weight, set.reps);
-        if (val > maxE1RM) {
-          maxE1RM = val;
-          best = {
-            weight: set.weight,
-            reps: set.reps,
-            e1rm: val,
-            definitionId: defId
-          };
-        }
-      }
-    });
-    return best;
-  }, [groupedWorkout]);
-
-  // --- RESTAURAR DRAFT ---
-  useEffect(() => {
-    const restoreDraft = async () => {
-      if (!sessionWorkoutId || loading) return; 
-      try {
-        const draftJson = await AsyncStorage.getItem(DRAFT_KEY);
-        if (draftJson) {
-          const draft = JSON.parse(draftJson);
-          if (draft.sessionId === sessionWorkoutId) {
-             setExerciseName(draft.exerciseName || '');
-             setWeight(draft.weight || '');
-             setReps(draft.reps || '');
-             setRpe(draft.rpe || '');
-             setObservations(draft.observations || '');
-             if (draft.definitionId) {
-                setCurrentDefinitionId(draft.definitionId);
-                fetchQuickStats(draft.definitionId);
-             }
-          } else {
-            AsyncStorage.removeItem(DRAFT_KEY);
-          }
-        }
-      } catch (e) { console.log('Erro draft load', e); }
-    };
-    restoreDraft();
-  }, [sessionWorkoutId, loading, fetchQuickStats]);
-
-  // --- SALVAR DRAFT AO DIGITAR ---
-  useEffect(() => {
-    if (!sessionWorkoutId) return;
-    const saveDraft = async () => {
-      const draft = {
-        sessionId: sessionWorkoutId,
-        exerciseName,
-        definitionId: currentDefinitionId,
-        weight,
-        reps,
-        rpe,
-        observations
-      };
-      await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-    };
-    const timeout = setTimeout(saveDraft, 1000);
-    return () => clearTimeout(timeout);
-  }, [sessionWorkoutId, exerciseName, currentDefinitionId, weight, reps, rpe, observations]);
-
-  const handleCleanup = useCallback(() => {
-    if (!paramWorkoutId) {
-      finishWorkout();
-    }
-  }, [finishWorkout, paramWorkoutId]);
-
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('blur', () => { handleCleanup(); });
-    return unsubscribe;
-  }, [navigation, handleCleanup]);
-
-  useEffect(() => {
-    const applyPlan = async () => {
-      if (paramTemplateId && sessionWorkoutId && !loading) {
-        if (groupedWorkout.length > 0) {
-          if (Object.keys(prescriptions).length === 0) {
-             const plannedExercises = await fetchPlannedExercises(paramTemplateId);
-             const prescrMap: Record<string, PlannedExercise> = {};
-             plannedExercises.forEach(p => prescrMap[p.definition_id] = p);
-             setPrescriptions(prescrMap);
-          }
-          return;
-        }
-        setLoadingPrescription(true);
-        try {
-          const plannedExercises = await fetchPlannedExercises(paramTemplateId);
-          const prescrMap: Record<string, PlannedExercise> = {};
-          
-          for (const plan of plannedExercises) {
-            const exInstanceId = await getOrCreateExerciseInWorkout(sessionWorkoutId, plan.definition_id);
-            prescrMap[plan.definition_id] = plan;
-            const targetSets = plan.sets_count || 3;
-            for (let i = 1; i <= targetSets; i++) {
-              await saveSet({
-                exercise_id: exInstanceId,
-                set_number: i,
-                weight: 0,
-                reps: 0,
-                rpe: plan.rpe_target ? parseFloat(plan.rpe_target) : undefined,
-              });
-            }
-          }
-          setPrescriptions(prescrMap);
-          const updatedData = await fetchAndGroupWorkoutData(sessionWorkoutId);
-          setGroupedWorkout(updatedData);
-        } catch (e) { 
-          console.error("Erro ao aplicar plano:", e); 
-        } finally { 
-          setLoadingPrescription(false); 
-        }
-      }
-    };
-    applyPlan();
-  }, [paramTemplateId, sessionWorkoutId, loading]);
-
-  useEffect(() => {
-    if (debouncedExerciseName.length >= 3 && !isAutocompleteFocused) {
-      const foundDefinition = allExerciseDefinitions.find(
-        (ex) => ex.exercise_name_lowercase === debouncedExerciseName.toLowerCase()
-      );
-      if (foundDefinition) {
-        const defId = foundDefinition.exercise_id;
-        if (currentDefinitionId !== defId) {
-          setCurrentDefinitionId(defId);
-          fetchQuickStats(defId);
-        }
-      } else {
-        if (currentDefinitionId !== null) {
-          setCurrentDefinitionId(null);
-          clearPeek();
-        }
-      }
-    } else {
-      if (!exerciseName && currentDefinitionId !== null) {
-        setCurrentDefinitionId(null);
-        clearPeek();
-      }
-    }
-  }, [debouncedExerciseName, isAutocompleteFocused, allExerciseDefinitions, fetchQuickStats, clearPeek, currentDefinitionId, exerciseName]);
-
-  useEffect(() => {
-    if (weight === '' || !reps) {
-      setBaseObservation((prevBase) => {
-        setObservations((prevObs) => (prevObs === prevBase ? '' : prevObs));
-        return '';
-      });
-      return;
-    }
-    const rawWeight = parseFloat(weight);
-    const repsNum = parseInt(reps, 10);
-    if (isNaN(rawWeight) || isNaN(repsNum) || repsNum <= 0) return;
-    
-    let weightInKg = inputUnit === 'lbs' ? rawWeight * LBS_TO_KG_FACTOR : rawWeight;
-    weightInKg = Math.round(weightInKg * 100) / 100;
-    
-    const e1rm = calculateE1RM(weightInKg, repsNum);
-    if (!e1rm || !isFinite(e1rm)) return;
-    
-    const newBase = `e1RM estimada: ${e1rm.toFixed(1)} kg`;
-    setBaseObservation((oldBase) => {
-      setObservations((prevObs) => (!prevObs || prevObs === oldBase ? newBase : prevObs));
-      return newBase;
-    });
-  }, [weight, reps, inputUnit]);
-
-  useEffect(() => {
-    const isUni = exerciseName.toLowerCase().includes('unilateral');
-    setIsUnilateral(isUni);
-    if (!isUni) setSide(null);
-  }, [exerciseName]);
-
-  const handleEditSet = useCallback((set: WorkoutSet, autoFillWeight?: string) => {
-    setExerciseName(groupedWorkout.find(ex => ex.id === set.exercise_id)?.name || '');
-    const weightToUse = autoFillWeight !== undefined ? autoFillWeight : (set.weight === null ? '' : set.weight.toString());
-    setWeight(weightToUse);
-    setReps(set.reps === 0 ? '' : set.reps.toString());
-    setRpe(set.rpe ? set.rpe.toString() : '');
-    setObservations(set.observations || '');
-    if (set.side) { setIsUnilateral(true); setSide(set.side); } else { setIsUnilateral(false); setSide(null); }
-    setEditingSetId(set.id);
-    const ex = groupedWorkout.find(e => e.id === set.exercise_id);
-    if (ex) {
-      setCurrentDefinitionId(ex.definition_id);
-      fetchQuickStats(ex.definition_id);
-    }
-  }, [groupedWorkout, fetchQuickStats]);
-
-  const handleCancelEdit = () => {
-    setEditingSetId(null);
-    // Não limpa campos ao cancelar edição, apenas sai do modo
-  };
-
-  const handlePopulateForm = useCallback((name: string, defId: string) => {
-    setExerciseName(name);
-    setCurrentDefinitionId(defId);
-    fetchQuickStats(defId);
-    setWeight(''); setReps(''); setRpe(''); setObservations(''); setSide(null); setEditingSetId(null); 
-    Haptics.selectionAsync();
-  }, [fetchQuickStats]);
-  
-  const handleClearForm = useCallback(async () => {
-    setExerciseName(''); setCurrentDefinitionId(null); setWeight(''); setReps(''); setRpe(''); setObservations(''); setSide(null); setEditingSetId(null); clearPeek();
-    await AsyncStorage.removeItem(DRAFT_KEY);
-  }, [clearPeek]);
 
   const handleShareSet = useCallback((set: WorkoutSet, isPR: boolean, exName: string, defId: string) => {
-      setDefinitionIdToShare(defId);
-      if (isPR) {
-        handleOpenSetShareModal(set, true, exName, sessionWorkoutId); 
-      } else {
-        handleOpenProgressionShareModal(set, exName, defId);
-      }
-  }, [handleOpenSetShareModal, handleOpenProgressionShareModal, sessionWorkoutId]);
+      if (isPR) handleOpenSetShareModal(set, true, exName, controller.session.sessionWorkoutId);
+      else handleOpenProgressionShareModal(set, exName, defId);
+  }, [handleOpenSetShareModal, handleOpenProgressionShareModal, controller.session.sessionWorkoutId]);
 
-  const handleShowCoachInstructions = useCallback(() => {
-    if (!currentDefinitionId) return;
-    const plan = prescriptions[currentDefinitionId];
-    const metaText = plan ? `Meta: ${plan.sets_count || '?'} sets x ${plan.reps_range || '?'} reps` : 'Sem meta definida';
-    const notes = plan?.notes || (plan as any)?.default_notes || 'Sem observações.';
-    const video = (plan as any)?.video_url;
-    Alert.alert('Instruções do Treino', `${metaText}\n\n📝 ${notes}${video ? '\n\n🎥 Há um vídeo disponível.' : ''}`, [{ text: 'Fechar', style: 'cancel' }, video ? { text: 'Ver Vídeo', onPress: () => Linking.openURL(video) } : { text: 'OK' }]);
-  }, [currentDefinitionId, prescriptions]);
+  // [CORREÇÃO 1] Passando o ID da sessão atual para excluir do histórico
+  const handleShowFormAnalytics = useCallback(() => {
+    if (!controller.form.values.definitionIdA) return;
+    const currentBest = controller.performance.performanceData?.bestPerformance || null;
+    
+    analyticsSheetRef.current?.openSheet(
+      controller.form.values.definitionIdA, 
+      controller.form.values.exerciseName, 
+      currentBest,
+      undefined,
+      controller.session.sessionWorkoutId // <--- AQUI
+    );
+  }, [controller.form.values.definitionIdA, controller.form.values.exerciseName, controller.performance.performanceData, controller.session.sessionWorkoutId]);
 
-  const handleFinishWorkout = useCallback(async () => {
-    setSaving(true);
-    try {
-      await finishWorkout(); 
-      await AsyncStorage.removeItem(DRAFT_KEY); 
-      navigation.replace('WorkoutHistory', { highlightWorkoutId: sessionWorkoutId || paramWorkoutId });
-    } catch (e: any) {
-      Alert.alert('Erro', e.message);
-    } finally {
-      setSaving(false);
-    }
-  }, [navigation, sessionWorkoutId, paramWorkoutId, finishWorkout]);
+  // [CORREÇÃO 2] Passando o ID da sessão atual também na lista
+  const handleShowLogAnalytics = useCallback((definitionId: string, name: string) => {
+    analyticsSheetRef.current?.openSheet(
+      definitionId, 
+      name, 
+      null, 
+      undefined, 
+      controller.session.sessionWorkoutId // <--- AQUI
+    );
+  }, [controller.session.sessionWorkoutId]);
 
   const handleSaveAndRest = async () => {
-    Keyboard.dismiss();
-    if (!exerciseName || weight === '' || !reps || !sessionWorkoutId) {
-      Alert.alert(t.common.attention, t.logWorkout.formValidation);
-      return;
-    }
-    if (isUnilateral && !side) {
-      Alert.alert(t.common.attention, t.logWorkout.unilateralValidation);
-      return;
-    }
-    await handleSaveSet(); 
-    const plannedRest = currentDefinitionId ? prescriptions[currentDefinitionId]?.rest_seconds : undefined;
-    startTimer(plannedRest || undefined); 
+    await controller.handleSaveSet();
+    startTimer();
+  };
+  
+  const handleShowInstructionsModal = async () => {
+    if (!controller.form.values.definitionIdA) return;
+    setIsInstructionModalVisible(true);
+    setLoadingInstructions(true);
+    try {
+      const { data, error } = await supabase
+        .from('exercise_definitions')
+        .select('default_notes, video_url')
+        .eq('id', controller.form.values.definitionIdA)
+        .single();
+      if (error) throw error;
+      setInstructionNote(data?.default_notes || '');
+      setInstructionVideo(data?.video_url || '');
+    } catch (e) { console.log(e); } finally { setLoadingInstructions(false); }
   };
 
-  const handleSaveSet = useCallback(async () => {
-    if (loadingStats) return;
-    if (!exerciseName || weight === '' || !reps || !sessionWorkoutId) {
-      return Alert.alert(t.common.attention, t.logWorkout.formValidation);
-    }
-    if (isUnilateral && !side) {
-      return Alert.alert(t.common.attention, t.logWorkout.unilateralValidation);
-    }
-    setSaving(true);
-    let definitionId = currentDefinitionId;
+  const handleSaveInstructions = async () => {
+    if (!controller.form.values.definitionIdA) return;
+    setSavingInstructions(true);
     try {
-      if (definitionId) {
-        const currentDefInCatalog = allExerciseDefinitions.find(ex => ex.exercise_id === definitionId);
-        if (currentDefInCatalog && currentDefInCatalog.exercise_name_lowercase !== exerciseName.trim().toLowerCase()) {
-           definitionId = null; 
-        }
-      }
-      if (!definitionId) {
-        const existingDef = allExerciseDefinitions.find(ex => ex.exercise_name_lowercase === exerciseName.trim().toLowerCase());
-        if (existingDef) {
-          definitionId = existingDef.exercise_id;
-        } else {
-          const newDefinition = await handleCreateDefinition(exerciseName);
-          if (!newDefinition) throw new Error('Falha ao criar exercício.');
-          definitionId = newDefinition.exercise_id;
-        }
-        setCurrentDefinitionId(definitionId);
-      }
-      if (!definitionId) throw new Error('ID de definição não encontrado.');
-
-      const exerciseInstanceId = await getOrCreateExerciseInWorkout(sessionWorkoutId, definitionId);
-      const rawWeight = parseFloat(weight);
-      if (isNaN(rawWeight)) throw new Error('Peso inválido.');
-      
-      let weightInKg = inputUnit === 'lbs' ? rawWeight * LBS_TO_KG_FACTOR : rawWeight;
-      weightInKg = Math.round(weightInKg * 100) / 100;
-
-      const commonData = {
-        weight: weightInKg,
-        reps: parseInt(reps, 10),
-        rpe: rpe ? parseFloat(rpe) : undefined,
-        observations: observations || undefined,
-        side: isUnilateral && side ? side : undefined,
-      };
-
-      let savedSet: WorkoutSet;
-      if (editingSetId) {
-        savedSet = await updateSet(editingSetId, commonData) as WorkoutSet;
-      } else {
-        const existingExercise = groupedWorkout.find((ex) => ex.id === exerciseInstanceId);
-        const nextSetNumber = (existingExercise ? existingExercise.sets.length : 0) + 1;
-        savedSet = await saveSet({
-          exercise_id: exerciseInstanceId,
-          set_number: nextSetNumber,
-          ...commonData
-        });
-      }
-
-      const pr = classifyPR(savedSet.weight, savedSet.reps, exerciseStats);
-      if (pr.isPR) {
-        setPrSetIds((prev) => new Set(prev).add(savedSet.id));
-        invalidateCache(definitionId);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-
-      const updatedData = await fetchAndGroupWorkoutData(sessionWorkoutId);
-      setGroupedWorkout(updatedData);
-      AsyncStorage.removeItem(DRAFT_KEY);
-
-      const plan = prescriptions[definitionId];
-      const targetSets = plan?.sets_count || 0;
-      if (targetSets > 0 && savedSet.set_number === targetSets) {
-        const currentExIndex = updatedData.findIndex(ex => ex.id === exerciseInstanceId);
-        const nextExercise = updatedData[currentExIndex + 1];
-        if (nextExercise) {
-          Alert.alert(
-            'Exercício Concluído! 🎉',
-            `Você finalizou as ${targetSets} séries.`,
-            [
-              { text: 'Add Extra', style: 'cancel', onPress: () => { handleCancelEdit(); setReps(''); setRpe(''); } },
-              { text: `Ir p/ ${nextExercise.name}`, onPress: () => {
-                  if (nextExercise.sets.length > 0) handleEditSet(nextExercise.sets[0]);
-                  else handlePopulateForm(nextExercise.name, nextExercise.definition_id);
-              }}
-            ]
-          );
-          return;
-        } else {
-           Alert.alert('Treino Concluído! 🏆', 'Todos os exercícios finalizados.', [
-             { text: 'Continuar', style: 'cancel' }, 
-             { text: 'Finalizar', onPress: handleFinishWorkout }
-           ]);
-          return;
-        }
-      }
-
-      const exerciseUpdated = updatedData.find(ex => ex.id === exerciseInstanceId);
-      if (editingSetId && exerciseUpdated) {
-        setEditingSetId(null);
-      } else {
-        setReps(''); setRpe(''); setObservations(baseObservation);
-        const nextDraft = {
-          sessionId: sessionWorkoutId,
-          exerciseName,
-          definitionId,
-          weight,
-          reps: '',
-          rpe: '',
-          observations: baseObservation
-        };
-        AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(nextDraft));
-      }
-    } catch (e: any) { 
-      Alert.alert(t.common.error, e.message); 
-    } finally { 
-      setSaving(false); 
-    }
-  }, [sessionWorkoutId, exerciseName, weight, reps, rpe, observations, inputUnit, isUnilateral, side, groupedWorkout, exerciseStats, loadingStats, baseObservation, setGroupedWorkout, setPrSetIds, currentDefinitionId, handleCreateDefinition, invalidateCache, editingSetId, prescriptions, handleCancelEdit, handleEditSet, handlePopulateForm, allExerciseDefinitions, handleFinishWorkout]);
-
-  const handleDeleteSet = useCallback(async (setId: string, exerciseId: string, definitionId: string) => {
-    try {
-      await deleteSet(setId);
-      const updatedData = await fetchAndGroupWorkoutData(sessionWorkoutId!);
-      setGroupedWorkout(updatedData);
-      invalidateCache(definitionId);
-    } catch (e: any) { Alert.alert('Erro', e.message); }
-  }, [setGroupedWorkout, invalidateCache, sessionWorkoutId]);
-
-  const handleDeleteExercise = useCallback(async (exerciseInstanceId: string, exerciseName: string) => {
-      try {
-        await deleteExercise(exerciseInstanceId);
-        setGroupedWorkout((currentData) => currentData.filter((ex) => ex.id !== exerciseInstanceId));
-      } catch (e: any) { Alert.alert('Erro', e.message); }
-  }, [setGroupedWorkout]);
-
-  // [CORREÇÃO] Passando o currentBest para o modal do form
-  const handleShowFormAnalytics = useCallback(() => {
-    if (!currentDefinitionId) return;
-    const currentBest = getBestSetForDefinition(currentDefinitionId);
-    analyticsSheetRef.current?.openSheet(currentDefinitionId, exerciseName, currentBest);
-  }, [currentDefinitionId, exerciseName, getBestSetForDefinition]);
-
-  // [CORREÇÃO] Passando o currentBest para o modal do card
-  const handleShowLogAnalytics = useCallback((definitionId: string, name: string) => {
-    const currentBest = getBestSetForDefinition(definitionId);
-    analyticsSheetRef.current?.openSheet(definitionId, name, currentBest);
-  }, [getBestSetForDefinition]);
-
-  const onDragEnd = async ({ data }: { data: WorkoutExercise[] }) => {
-    setGroupedWorkout(data);
-    setIsReordering(true);
-    const updates = data.map((ex, index) => ({ id: ex.id, order: index }));
-    try {
-      await reorderWorkoutExercises(updates);
-    } catch (e: any) {
-      console.error('Erro ao reordenar:', e.message);
-      Alert.alert('Erro', 'Falha ao salvar a nova ordem.');
-    } finally {
-      setIsReordering(false);
-    }
+      await updateExerciseInstructions(controller.form.values.definitionIdA, instructionNote, instructionVideo);
+      Alert.alert('Sucesso', 'Ajustes salvos!');
+      setIsInstructionModalVisible(false);
+    } catch (e: any) { Alert.alert('Erro', e.message); } finally { setSavingInstructions(false); }
   };
 
-  const templateHint = useMemo(() => {
-    if (currentPlan) {
-      return `Meta: ${currentPlan.sets_count || '?'} x ${currentPlan.reps_range || '?'} @ RPE ${currentPlan.rpe_target || '?'}`;
+  const handleOpenVideo = () => {
+    if (instructionVideo) {
+       setActiveVideoUrl(instructionVideo);
+       setVideoModalVisible(true);
     }
-    
-    if (exerciseStats && exerciseStats.max_reps_by_weight) {
-      let bestSet = { weight: 0, reps: 0, e1rm: 0 };
-      Object.entries(exerciseStats.max_reps_by_weight).forEach(([wStr, r]) => {
-        const w = parseFloat(wStr);
-        const e = calculateE1RM(w, r);
-        if (e > bestSet.e1rm) {
-          bestSet = { weight: w, reps: r, e1rm: e };
-        }
-      });
-      if (bestSet.weight > 0) {
-        const displayWeight = inputUnit === 'lbs' ? (bestSet.weight / LBS_TO_KG_FACTOR).toFixed(0) : bestSet.weight;
-        const unitLabel = inputUnit === 'lbs' ? 'lbs' : 'kg';
-        const e1rmLabel = inputUnit === 'lbs' ? (bestSet.e1rm / LBS_TO_KG_FACTOR).toFixed(0) : bestSet.e1rm.toFixed(0);
-
-        return `Melhor série: ${displayWeight} ${unitLabel} pra ${bestSet.reps} reps (e1RM ${e1rmLabel} ${unitLabel})`;
-      }
-    }
-    return '';
-  }, [currentPlan, exerciseStats, inputUnit]);
-
-  if (loading) return <View style={styles.loadingContainer}><ActivityIndicator size="large" /></View>;
+  };
 
   const workoutFormProps: WorkoutFormProps = {
-    exerciseName,
-    setExerciseName,
-    weight,
-    setWeight,
-    reps,
-    setReps,
-    rpe,
-    setRpe,
-    observations,
-    setObservations,
-    saving,
-    handleSaveSet,
+    exerciseName: controller.form.values.exerciseName,
+    setExerciseName: controller.form.setters.setExerciseName,
+    weight: controller.form.values.weight,
+    setWeight: controller.form.setters.setWeight,
+    reps: controller.form.values.reps,
+    setReps: controller.form.setters.setReps,
+    rpe: controller.form.values.rpe,
+    setRpe: controller.form.setters.setRpe,
+    definitionIdA: controller.form.values.definitionIdA,
+
+    exerciseNameB: controller.form.values.exerciseNameB,
+    setExerciseNameB: controller.form.setters.setExerciseNameB,
+    weightB: controller.form.values.weightB,
+    setWeightB: controller.form.setters.setWeightB,
+    repsB: controller.form.setters.setRepsB,
+    definitionIdB: controller.form.values.definitionIdB,
+
+    exerciseNameC: controller.form.values.exerciseNameC,
+    setExerciseNameC: controller.form.setters.setExerciseNameC,
+    weightC: controller.form.values.weightC,
+    setWeightC: controller.form.setters.setWeightC,
+    repsC: controller.form.setters.setRepsC,
+    definitionIdC: controller.form.values.definitionIdC,
+
+    subSets: controller.form.values.subSets,
+    setSubSets: controller.form.setters.setSubSets,
+
+    activeSetType: controller.form.values.activeSetType,
+    setActiveSetType: controller.form.setters.setActiveSetType,
+    
+    observations: controller.form.values.observations,
+    setObservations: controller.form.setters.setObservations,
+    
+    saving: controller.saving,
+    handleSaveSet: controller.handleSaveSet,
     onSaveAndRest: handleSaveAndRest,
-    allExerciseNames,
-    isAutocompleteFocused,
-    setIsAutocompleteFocused,
-    loadingPerformance: loadingStats,
-    lastPerformance: [],
-    bestPerformance: null,
+    
+    allExerciseNames: controller.catalog.allExerciseNames,
+    isAutocompleteFocused: controller.isAutocompleteFocused,
+    setIsAutocompleteFocused: controller.setIsAutocompleteFocused,
+    
+    loadingPerformance: controller.performance.loadingStats,
+    lastPerformance: controller.performance.performanceData?.lastPerformance || [],
+    bestPerformance: controller.performance.performanceData?.bestPerformance || null,
+    
     handleShowInfoModal: handleShowFormAnalytics,
-    templateHint: templateHint,
-    isTemplateMode: false,
-    isUnilateral,
-    side,
-    setSide,
-    inputUnit,
-    setInputUnit,
-    isEditing: !!editingSetId,
-    onCancelEdit: handleCancelEdit,
-    onShowCoachInstructions: currentPlan ? handleShowCoachInstructions : undefined,
-    onClear: handleClearForm,
+    onShowCoachInstructions: handleShowInstructionsModal,
+    
+    isUnilateral: controller.form.values.isUnilateral,
+    side: controller.form.values.side,
+    setSide: controller.form.setters.setSide,
+    inputUnit: controller.form.values.inputUnit,
+    setInputUnit: controller.form.setters.setInputUnit,
+    
+    isEditing: !!controller.form.values.editingSetId,
+    onCancelEdit: () => {
+       controller.form.setters.setEditingSetId(null);
+       controller.form.actions.clearForm();
+    },
+    onClearExerciseName: controller.handleClearExerciseName
   };
+
+  if (controller.session.loading) {
+     return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
+  }
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
       <DraggableFlatList
-        data={groupedWorkout}
-        onDragEnd={onDragEnd}
-        keyExtractor={(item) => item.id}
+        data={controller.session.groupedWorkout}
+        keyExtractor={item => item.id}
+        onDragEnd={(data) => { }}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.listContentContainer}
-        onScrollBeginDrag={() => { setIsAutocompleteFocused(false); Keyboard.dismiss(); }}
+        onScrollBeginDrag={() => { controller.setIsAutocompleteFocused(false); Keyboard.dismiss(); }}
+        
         ListHeaderComponent={
           <>
             <WorkoutForm {...workoutFormProps} />
             <View style={styles.logContainer}>
-              <Text style={styles.logTitle}>{paramWorkoutId ? t.logWorkout.logTitleEdit : (paramTemplateId ? 'Treino Prescrito' : t.logWorkout.logTitleNew)}</Text>
-              {loadingPrescription && <ActivityIndicator size="small" color="#007AFF" style={{marginBottom: 10}} />}
-              {groupedWorkout.length === 0 && !loadingPrescription && <Text style={styles.emptyText}>{t.logWorkout.emptyLog}</Text>}
+              <Text style={styles.logTitle}>
+                {route.params?.workoutId ? t('logWorkout.logTitleEdit') : t('logWorkout.logTitleNew')}
+              </Text>
+              {controller.session.groupedWorkout.length === 0 && (
+                <Text style={styles.emptyText}>{t('logWorkout.emptyLog')}</Text>
+              )}
             </View>
           </>
         }
-        renderItem={({ item, drag, isActive }: RenderItemParams<WorkoutExercise>) => (
-          <ExerciseCard
-            exercise={item}
-            activeTemplate={false}
-            prSetIds={prSetIds}
-            isFetchingShareData={isFetchingShareData}
-            onShowAnalytics={handleShowLogAnalytics}
-            onEditSet={handleEditSet}
-            onShareSet={handleShareSet}
-            onDeleteSet={handleDeleteSet}
-            onPopulateForm={handlePopulateForm}
-            drag={drag}
-            isActive={isActive}
-          />
-        )}
+
+        renderItem={({ item, drag, isActive }: RenderItemParams<WorkoutExercise>) => {
+           const isEditingThisExercise = !!controller.form.values.editingSetId && 
+                                         item.sets.some(s => s.id === controller.form.values.editingSetId);
+
+           return (
+              <ExerciseCard
+                exercise={item}
+                activeTemplate={false}
+                prSetIds={controller.prSetIds}
+                isFetchingShareData={isFetchingShareData}
+                
+                isHighlighted={isEditingThisExercise}
+                editingSetId={controller.form.values.editingSetId}
+
+                onShowAnalytics={handleShowLogAnalytics}
+                onEditSet={controller.handleEditSet}
+                onShareSet={handleShareSet}
+                onDeleteSet={controller.handleDeleteSet}
+                onDeleteExercise={controller.handleDeleteExercise}
+                
+                onPopulateForm={(name, id) => {
+                   controller.form.setters.setExerciseName(name);
+                   controller.form.setters.setDefinitionIdA(id);
+                }}
+                
+                drag={drag}
+                isActive={isActive}
+              />
+           );
+        }}
+
         ListFooterComponent={
           <View style={styles.footer}>
-            <TouchableOpacity style={styles.buttonSecondary} onPress={handleFinishWorkout}>
-              <Text style={styles.buttonTextSecondary}>{paramWorkoutId ? t.logWorkout.updateWorkoutButton : t.logWorkout.finishWorkoutButton}</Text>
-            </TouchableOpacity>
+             <TouchableOpacity style={styles.finishBtn} onPress={controller.handleFinish}>
+                <Text style={styles.finishText}>{t('logWorkout.finishWorkoutButton')}</Text>
+             </TouchableOpacity>
           </View>
         }
       />
       
-      <ExerciseAnalyticsSheet ref={analyticsSheetRef} />
+      <ExerciseAnalyticsSheet ref={analyticsSheetRef} /> 
+      
       <SetShareModal
         visible={isSetShareModalVisible}
         onClose={handleCloseSetShareModal}
         exerciseName={exerciseNameToShare}
         set={setToshare}
-        definitionId={definitionIdToShare}
+        definitionId={controller.form.values.definitionIdA || null}
         isPR={isSharingPR}
       />
+      
       <ProgressionShareModal
         visible={isProgressionShareModalVisible}
         onClose={handleCloseProgressionShareModal}
@@ -677,18 +292,167 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
         progression={progressionDataForModal}
         currentSessionTEV={currentSessionTEV}
       />
+
+      <VideoPlayerModal 
+        visible={videoModalVisible} 
+        videoUrl={activeVideoUrl} 
+        onClose={() => setVideoModalVisible(false)} 
+      />
+
+      <Modal
+        visible={isInstructionModalVisible}
+        transparent
+        animationType="fade" 
+        onRequestClose={() => setIsInstructionModalVisible(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setIsInstructionModalVisible(false)}
+        >
+          <KeyboardAvoidingView 
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalKeyboardContainer}
+          >
+            <TouchableOpacity activeOpacity={1} style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Instruções & Ajustes</Text>
+                <TouchableOpacity onPress={() => setIsInstructionModalVisible(false)}>
+                  <Feather name="x" size={24} color="#718096" />
+                </TouchableOpacity>
+              </View>
+              
+              <Text style={styles.modalSubtitle}>
+                Edite aqui os detalhes fixos deste exercício (ex: altura do banco, pino da máquina).
+              </Text>
+
+              {loadingInstructions ? (
+                <ActivityIndicator size="large" color="#007AFF" style={{marginVertical: 20}} />
+              ) : (
+                <>
+                  <Text style={styles.modalLabel}>Notas de Execução</Text>
+                  <TextInput
+                    style={[styles.modalInput, styles.modalTextArea]}
+                    placeholder="Ex: Banco no 3, pegada aberta..."
+                    multiline
+                    textAlignVertical="top"
+                    value={instructionNote}
+                    onChangeText={setInstructionNote}
+                  />
+
+                  <Text style={styles.modalLabel}>Link de Vídeo</Text>
+                  <View style={{flexDirection: 'row', gap: 10}}>
+                     <TextInput
+                       style={[styles.modalInput, { flex: 1 }]}
+                       placeholder="https://..."
+                       value={instructionVideo}
+                       onChangeText={setInstructionVideo}
+                       autoCapitalize="none"
+                     />
+                     {instructionVideo.length > 0 && (
+                       <TouchableOpacity style={styles.modalVideoBtn} onPress={handleOpenVideo}>
+                          <Feather name="play" size={20} color="#FFF" />
+                       </TouchableOpacity>
+                     )}
+                  </View>
+
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSaveInstructions} disabled={savingInstructions}>
+                      {savingInstructions ? (
+                        <ActivityIndicator color="#FFF" />
+                      ) : (
+                        <Text style={styles.modalSaveText}>Salvar Ajustes</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
+
     </KeyboardAvoidingView>
   );
-};
+}
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#FFF' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  
   listContentContainer: { paddingBottom: 20 },
   logContainer: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 0 },
-  logTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16 },
+  logTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 16, color: '#1A202C' },
   emptyText: { fontSize: 16, color: '#777', textAlign: 'center', marginTop: 10, marginBottom: 10 },
+  
   footer: { padding: 20, paddingTop: 0, marginTop: 10 },
-  buttonSecondary: { backgroundColor: '#fff', paddingVertical: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#007AFF', flexDirection: 'row', justifyContent: 'center', gap: 8 },
-  buttonTextSecondary: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
+  finishBtn: { 
+    backgroundColor: '#FFF', 
+    borderWidth: 1, 
+    borderColor: '#007AFF', 
+    padding: 14, 
+    borderRadius: 10, 
+    alignItems: 'center' 
+  },
+  finishText: { color: '#007AFF', fontWeight: 'bold', fontSize: 16 },
+
+  modalOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0,0,0,0.6)', 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    padding: 20
+  },
+  modalKeyboardContainer: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  modalContent: { 
+    width: '100%',
+    backgroundColor: '#FFF', 
+    borderRadius: 16, 
+    padding: 24, 
+    shadowColor: "#000", 
+    shadowOffset: { width: 0, height: 4 }, 
+    shadowOpacity: 0.1, 
+    shadowRadius: 12, 
+    elevation: 10 
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8
+  },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#2D3748' },
+  modalSubtitle: { fontSize: 14, color: '#718096', marginBottom: 20 },
+  modalLabel: { fontSize: 14, fontWeight: '600', color: '#4A5568', marginBottom: 8 },
+  modalInput: { 
+    borderWidth: 1, 
+    borderColor: '#E2E8F0', 
+    borderRadius: 8, 
+    padding: 12, 
+    fontSize: 16, 
+    marginBottom: 16, 
+    backgroundColor: '#F7FAFC',
+    color: '#2D3748'
+  },
+  modalTextArea: { height: 100 },
+  modalVideoBtn: { 
+    backgroundColor: '#E53E3E', 
+    borderRadius: 8, 
+    width: 48, 
+    height: 48, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    marginBottom: 16 
+  },
+  modalActions: { marginTop: 8 },
+  modalSaveBtn: { 
+    backgroundColor: '#007AFF', 
+    padding: 16, 
+    borderRadius: 10, 
+    alignItems: 'center' 
+  },
+  modalSaveText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
 });

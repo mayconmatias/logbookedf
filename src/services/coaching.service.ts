@@ -158,3 +158,101 @@ export const fetchStudentUniqueExercises = async (studentId: string) => {
   if (error) throw error;
   return data as { definition_id: string; name: string }[] || [];
 };
+
+export interface CoachingMessage {
+  id: string;
+  relationship_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  is_read: boolean;
+}
+
+/**
+ * Busca a mensagem mais recente para exibir no topo do Dashboard.
+ */
+export const fetchLatestCoachMessage = async (relationshipId: string): Promise<CoachingMessage | null> => {
+  const { data, error } = await supabase
+    .from('coaching_messages')
+    .select('*')
+    .eq('relationship_id', relationshipId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+};
+
+/**
+ * Busca o histórico completo de mensagens.
+ */
+export const fetchMessageHistory = async (relationshipId: string): Promise<CoachingMessage[]> => {
+  const { data, error } = await supabase
+    .from('coaching_messages')
+    .select('*')
+    .eq('relationship_id', relationshipId)
+    .order('created_at', { ascending: false }); // Mais recentes primeiro
+
+  if (error) throw error;
+  return data || [];
+};
+
+/**
+ * Envia uma nova mensagem.
+ */
+export const sendCoachingMessage = async (relationshipId: string, content: string) => {
+  const { error } = await supabase
+    .from('coaching_messages')
+    .insert({
+      relationship_id: relationshipId,
+      content: content.trim()
+    });
+
+  if (error) throw error;
+};
+
+// Adicione ao final do arquivo src/services/coaching.service.ts
+
+/**
+ * Busca a última mensagem NÃO LIDA enviada pelo TREINADOR para o aluno logado.
+ */
+export const fetchUnreadCoachMessage = async () => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  // 1. Acha o relacionamento ativo onde sou aluno
+  const { data: rel } = await supabase
+    .from('coaching_relationships')
+    .select('id')
+    .eq('student_id', user.id)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (!rel) return null;
+
+  // 2. Busca mensagem não lida que NÃO fui eu que enviei (logo, foi o coach)
+  const { data: msg } = await supabase
+    .from('coaching_messages')
+    .select('*')
+    .eq('relationship_id', rel.id)
+    .neq('sender_id', user.id) // Garante que não é msg minha
+    .eq('is_read', false)      // Apenas não lidas
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return msg;
+};
+
+/**
+ * Marca uma mensagem como lida (Dismiss)
+ */
+export const markMessageAsRead = async (messageId: string) => {
+  const { error } = await supabase
+    .from('coaching_messages')
+    .update({ is_read: true })
+    .eq('id', messageId);
+    
+  if (error) throw error;
+};

@@ -5,17 +5,18 @@ import {
   StyleSheet, 
   TouchableOpacity, 
   Dimensions,
-  Vibration,
   Platform,
   TouchableWithoutFeedback,
   TextInput,
   Alert,
   Keyboard
 } from 'react-native';
+import { triggerHaptic } from '@/utils/haptics';
 import { Feather } from '@expo/vector-icons';
 import { useTimer } from '@/context/TimerContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { navigate } from '@/utils/navigationRef'; 
+import AsyncStorage from '@react-native-async-storage/async-storage'; // [NOVO] Import para ler a sessão
 
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { 
@@ -33,6 +34,9 @@ const FAB_SIZE = 60;
 const SATELLITE_SIZE = 44;
 const RADIUS = 110; 
 const MARGIN = 20;
+
+// Chave usada no workouts.service.ts para persistir a sessão atual
+const SESSION_KEY = '@sessionWorkoutId';
 
 const SatelliteButton = ({ 
   index, 
@@ -171,15 +175,31 @@ export default function RestTimer() {
     setIsMenuOpen(false);
   };
 
-  // [CORREÇÃO] Navegação para a tela de LogWorkout
-  const handleNextSet = () => {
+  // [CORREÇÃO] Lógica aprimorada para retomar a sessão correta
+  const handleNextSet = async () => {
     stopTimer();
-    navigate('LogWorkout'); 
+    
+    try {
+      // Tenta recuperar o ID da sessão ativa do armazenamento local
+      const currentSessionId = await AsyncStorage.getItem(SESSION_KEY);
+
+      if (currentSessionId) {
+         // Se existe uma sessão ativa (seja livre ou programa), forçamos a navegação para ela
+         navigate('LogWorkout', { workoutId: currentSessionId });
+      } else {
+         // Fallback: comportamento padrão (LogWorkout tentará encontrar ou criar)
+         navigate('LogWorkout');
+      }
+    } catch (error) {
+      console.log("Erro ao navegar via Timer:", error);
+      navigate('LogWorkout');
+    }
   };
 
   const handleSelectPreset = (index: number) => {
     if (!isPro && index !== 0) {
-      if (Platform.OS !== 'web') Vibration.vibrate(50);
+      // SUBSTITUIR: if (Platform.OS !== 'web') Vibration.vibrate(50);
+      triggerHaptic('error'); // Ou 'warning', para indicar bloqueio
       return;
     }
     selectPreset(index);
@@ -203,8 +223,9 @@ export default function RestTimer() {
         onPress: () => {
           const newPresets = presets.filter(s => s !== secsToDelete);
           updatePresets(newPresets);
-          if (Platform.OS !== 'web') Vibration.vibrate(50);
-        } 
+          // SUBSTITUIR: if (Platform.OS !== 'web') Vibration.vibrate(50);
+          triggerHaptic('light');
+        }
       }
     ]);
   };
@@ -411,8 +432,7 @@ export default function RestTimer() {
             onPress={handleMainTap}
             onLongPress={() => {
               if (isAddingMode) return;
-              if (Platform.OS !== 'web') Vibration.vibrate(50);
-              setIsMenuOpen(true);
+              triggerHaptic('medium');              setIsMenuOpen(true);
             }}
             delayLongPress={300}
             activeOpacity={0.9}
