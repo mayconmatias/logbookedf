@@ -1,19 +1,34 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator, Alert, UIManager, Platform } from 'react-native';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  ScrollView, 
+  RefreshControl, 
+  TouchableOpacity, 
+  ActivityIndicator, 
+  UIManager, 
+  Platform 
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { toast } from 'sonner-native';
 import { useTranslation } from 'react-i18next';
+import { supabase } from '@/lib/supabaseClient';
 
+// Services
 import { fetchDashboardStats, DashboardStats } from '@/services/dashboard.service';
-import { autoClassifyExistingExercises } from '@/services/exercises.service';
-import DaldaModal from '@/components/DaldaModal';
+import { fetchStudentProgressReport, StudentProgressReport } from '@/services/stats.service';
+import { fetchMacroEvolutionData, EvolutionPoint } from '@/services/evolution.service';
 
-// Widgets Refatorados
+// Components
+import DaldaModal from '@/components/DaldaModal';
 import { HighlightsWidget } from '@/components/dashboard/HighlightsWidget';
 import { VolumeAnalysisWidget } from '@/components/dashboard/VolumeAnalysisWidget';
 import { EvolutionWidget } from '@/components/dashboard/EvolutionWidget';
+import { MuscleEvolutionCard } from '@/components/dashboard/MuscleEvolutionCard';
+import { MacroEvolutionChart } from '@/components/dashboard/MacroEvolutionChart';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -21,6 +36,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 type FilterKeys = 'normal' | 'warmup' | 'advanced';
 
+// --- COMPONENTE INTERNO: CARD DE ESTADO (DALDA) ---
 const HighContrastStateCard = ({ lastCheckin, onPress, t }: { lastCheckin: any, onPress: () => void, t: any }) => {
   const isToday = lastCheckin?.date === new Date().toISOString().split('T')[0];
 
@@ -78,112 +94,200 @@ const HighContrastStateCard = ({ lastCheckin, onPress, t }: { lastCheckin: any, 
   );
 };
 
+// --- TELA PRINCIPAL ---
 export default function DashboardScreen() {
   const { t } = useTranslation();
+  
+  // Estados de Dados
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [progressReport, setProgressReport] = useState<StudentProgressReport | null>(null);
+  
+  // MACRO CHART (Geral vs Específico)
+  const [generalMacroData, setGeneralMacroData] = useState<EvolutionPoint[]>([]);
+  const [specificMacroData, setSpecificMacroData] = useState<EvolutionPoint[]>([]);
+  const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
+  const [loadingSpecific, setLoadingSpecific] = useState(false);
+
+  // Estados de Controle UI
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isDaldaVisible, setIsDaldaVisible] = useState(false);
-  const [repairing, setRepairing] = useState(false);
 
+  // Estados de Filtros
+  const [evolutionPeriod, setEvolutionPeriod] = useState(6); // Default: 6 semanas
   const [filters, setFilters] = useState<Record<FilterKeys, boolean>>({
     warmup: false,
     normal: true,
     advanced: true
   });
 
+  // 1. CARGA INICIAL
   const load = useCallback(async () => {
     try {
+      // Filtros
       const types: string[] = [];
       if (filters.warmup) types.push('warmup');
       if (filters.normal) types.push('normal');
       if (filters.advanced) types.push('drop', 'rest_pause', 'cluster', 'biset', 'triset');
-
       const queryTypes = types.length > 0 ? types : ['none'];
 
-      const data = await fetchDashboardStats(queryTypes, null);
-      setStats(data);
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // Busca Paralela
+      const [dataStats, dataProgress] = await Promise.all([
+        fetchDashboardStats(queryTypes, null),
+        user ? fetchStudentProgressReport(user.id, evolutionPeriod) : null
+      ]);
+
+      setStats(dataStats);
+      setProgressReport(dataProgress);
+
+      // Processa dados GERAIS para o gráfico do topo
+      if (dataStats?.evolution_trend) {
+        const formattedGeneral = dataStats.evolution_trend.map(d => ({
+          date: d.date,
+          label: d.date.split('-').slice(1).reverse().join('/'),
+          volume: d.volume,
+          avgReps: 0 // Endpoint geral ainda não traz reps
+        }));
+        setGeneralMacroData(formattedGeneral);
+      }
+
     } catch (e) { 
       toast.error('Erro ao carregar dados');
+      console.error(e);
     } finally { 
       setLoading(false); 
       setRefreshing(false); 
     }
-  }, [filters]);
+  }, [filters, evolutionPeriod]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
-  const handleRefresh = () => { setRefreshing(true); load(); };
 
-  const handleForceReclassify = async () => {
-    setRepairing(true);
-    try {
-      Alert.alert(
-        "Reclassificar Biblioteca",
-        "A IA irá re-analisar TODOS os seus exercícios para corrigir categorias (Peito, Costas, etc). Isso pode levar um minuto.",
-        [
-          { text: "Cancelar", style: "cancel", onPress: () => setRepairing(false) },
-          { 
-            text: "Iniciar", 
-            onPress: async () => {
-              toast.message('Iniciando manutenção...');
-              const count = await autoClassifyExistingExercises(true);
-              toast.success(`${count} exercícios processados e corrigidos.`);
-              load();
-              setRepairing(false);
-            }
-          }
-        ]
-      );
-    } catch (e) {
-      toast.error('Falha na conexão.');
-      setRepairing(false);
+  // 2. SELEÇÃO DE MÚSCULO (ACCORDION)
+  const handleMuscleSelect = async (muscle: string) => {
+    // Se clicar no mesmo, fecha e volta para visão geral
+    if (selectedMuscle === muscle) {
+      setSelectedMuscle(null);
+      setSpecificMacroData([]);
+      return;
     }
+
+    // Se clicar em outro, abre e busca dados específicos
+    setSelectedMuscle(muscle);
+    setLoadingSpecific(true);
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const data = await fetchMacroEvolutionData(user.id, 'week', 'muscle_group', muscle);
+        setSpecificMacroData(data);
+      }
+    } catch (e) {
+      console.log("Erro ao buscar detalhe muscular:", e);
+      toast.error('Dados insuficientes para este grupo.');
+      setSpecificMacroData([]);
+    } finally {
+      setLoadingSpecific(false);
+    }
+  };
+
+  const handleRefresh = () => { 
+    setRefreshing(true); 
+    load(); 
   };
 
   const toggleFilter = (key: FilterKeys) => {
     setFilters(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  if (loading && !stats) return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
+  // Lógica de exibição do gráfico do topo
+  const activeChartData = selectedMuscle ? specificMacroData : generalMacroData;
+  const activeChartTitle = selectedMuscle ? `Evolução: ${selectedMuscle}` : "Visão Geral do Treino";
+  const activeChartColor = selectedMuscle ? "#38A169" : "#805AD5"; 
+
+  if (loading && !stats) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
 
   return (
     <ScrollView 
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       contentContainerStyle={{ paddingBottom: 80, paddingTop: 20 }}
+      showsVerticalScrollIndicator={false}
     >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('dashboard.title')}</Text>
         <Text style={styles.headerSubtitle}>{t('dashboard.subtitle')}</Text>
       </View>
 
-      {/* CARD 0: ESTADO DALDA */}
+      {/* 1. CHECK-IN DIÁRIO */}
       {stats?.last_checkin && (
-         <HighContrastStateCard lastCheckin={stats.last_checkin} onPress={() => setIsDaldaVisible(true)} t={t} />
+         <HighContrastStateCard 
+            lastCheckin={stats.last_checkin} 
+            onPress={() => setIsDaldaVisible(true)} 
+            t={t} 
+         />
       )}
 
-      {/* WIDGETS */}
+      {/* 2. DESTAQUES */}
       <HighlightsWidget stats={stats?.time_stats} />
+      
+      {/* 3. GRÁFICO MACRO */}
+      <View style={{ marginBottom: 16 }}>
+         {loadingSpecific ? (
+            <View style={[styles.chartLoadingContainer, { height: 280 }]}>
+                <ActivityIndicator size="large" color={activeChartColor} />
+                <Text style={{ marginTop: 10, color: '#A0AEC0' }}>Carregando {selectedMuscle}...</Text>
+            </View>
+         ) : (
+            <MacroEvolutionChart 
+               data={activeChartData} 
+               title={activeChartTitle}
+               colorVolume={activeChartColor}
+            />
+         )}
+      </View>
+
+      {/* 4. ANÁLISE MUSCULAR (ACCORDION) */}
+      {progressReport && (
+         <MuscleEvolutionCard 
+            data={progressReport.muscle_summary} 
+            
+            // Controle de Tempo
+            currentPeriod={evolutionPeriod}
+            onPeriodChange={setEvolutionPeriod}
+            
+            // Controle de Accordion
+            expandedMuscle={selectedMuscle}
+            onMuscleSelect={handleMuscleSelect}
+         />
+      )}
+
+      {/* 5. VOLUME SEMANAL (LEGADO) */}
       <VolumeAnalysisWidget 
          tagStats={stats?.tag_stats || []} 
          exerciseStats={stats?.exercise_stats || []}
          filters={filters} 
          onToggleFilter={toggleFilter}
       />
+      
+      {/* 6. EVOLUÇÃO GERAL (LEGADO) */}
       <EvolutionWidget 
          weeklyData={stats?.evolution_trend || []} 
          dailyData={stats?.evolution_daily || []} 
       />
 
-      {/* Botão de Manutenção */}
-      <TouchableOpacity style={styles.repairButton} onPress={handleForceReclassify} disabled={repairing}>
-        {repairing ? <ActivityIndicator color="#718096" size="small" /> : <Feather name="tool" size={14} color="#718096" />}
-        <Text style={styles.repairText}>
-          {repairing ? t('dashboard.processing') : t('dashboard.catalogMaintenance')}
-        </Text>
-      </TouchableOpacity>
-
-      <DaldaModal visible={isDaldaVisible} onClose={() => setIsDaldaVisible(false)} onSuccess={load} />
+      <DaldaModal 
+        visible={isDaldaVisible} 
+        onClose={() => setIsDaldaVisible(false)} 
+        onSuccess={load} 
+      />
     </ScrollView>
   );
 }
@@ -191,18 +295,34 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  
   header: { paddingHorizontal: 20, marginBottom: 20 },
   headerTitle: { fontSize: 26, fontWeight: '800', color: '#1A202C', letterSpacing: -0.5 },
   headerSubtitle: { fontSize: 14, color: '#718096', marginTop: 4 },
-  actionCard: { backgroundColor: '#FFF', marginHorizontal: 20, marginBottom: 20, borderRadius: 16, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 16, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 3 },
+  
+  actionCard: { 
+    backgroundColor: '#FFF', marginHorizontal: 20, marginBottom: 20, borderRadius: 16, padding: 16, 
+    flexDirection: 'row', alignItems: 'center', gap: 16, 
+    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 3 
+  },
   actionIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   actionTitle: { fontSize: 16, fontWeight: '700', color: '#2D3748' },
   actionSub: { fontSize: 13, color: '#718096', marginTop: 2 },
-  stateCard: { marginHorizontal: 20, marginBottom: 20, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.05)' },
+  
+  stateCard: { 
+    marginHorizontal: 20, marginBottom: 20, borderRadius: 16, padding: 20, 
+    borderWidth: 1, borderColor: 'rgba(0,0,0,0.05)' 
+  },
   stateLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 4, opacity: 0.8 },
   stateTitle: { fontSize: 22, fontWeight: '900' },
-  insightBox: { marginTop: 16, padding: 12, borderRadius: 8, borderWidth: 1.5, borderStyle: 'dashed', backgroundColor: 'rgba(255,255,255,0.4)' },
+  insightBox: { 
+    marginTop: 16, padding: 12, borderRadius: 8, borderWidth: 1.5, 
+    borderStyle: 'dashed', backgroundColor: 'rgba(255,255,255,0.4)' 
+  },
   insightText: { fontSize: 14, fontWeight: '600', fontStyle: 'italic', lineHeight: 20 },
-  repairButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16, opacity: 0.8 },
-  repairText: { color: '#718096', fontWeight: '500', fontSize: 12 },
+  
+  chartLoadingContainer: {
+    marginHorizontal: 16, borderRadius: 16, backgroundColor: '#FFF',
+    justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#EDF2F7'
+  },
 });

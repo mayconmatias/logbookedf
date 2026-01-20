@@ -16,7 +16,6 @@ export const useWorkoutSession = (
   const [groupedWorkout, setGroupedWorkout] = useState<WorkoutExercise[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // [NOVO] Flag para identificar se é treino estruturado
   const [isProgram, setIsProgram] = useState(false);
 
   const initializeSession = useCallback(async (signal: AbortSignal) => {
@@ -34,7 +33,7 @@ export const useWorkoutSession = (
       // 1. Busca dados agrupados (Exercícios e Séries)
       data = await fetchAndGroupWorkoutData(workoutId);
 
-      // 2. [NOVO] Verifica se é Programa/Template
+      // 2. Verifica se é Programa/Template
       if (workoutId) {
         const { data: wInfo } = await supabase
           .from('workouts')
@@ -42,7 +41,6 @@ export const useWorkoutSession = (
           .eq('id', workoutId)
           .single();
         
-        // Se tiver ID de template ou programa, é estruturado. Se não, é Livre.
         if (wInfo && (wInfo.template_id || wInfo.planned_workout_id)) {
             setIsProgram(true);
         } else {
@@ -73,14 +71,18 @@ export const useWorkoutSession = (
     };
   }, [initializeSession]);
 
+  // [CORREÇÃO AQUI]
   const finishWorkout = useCallback(async () => {
+    // Se não tem ID carregado, não tem o que finalizar
     if (!sessionWorkoutId) return;
+
     const hasSavedSets = groupedWorkout.some((ex) => ex.sets.length > 0);
     
-    if (!paramWorkoutId) {
-      await finishWorkoutSession(sessionWorkoutId, hasSavedSets);
-    }
-  }, [sessionWorkoutId, groupedWorkout, paramWorkoutId]);
+    // Removemos a trava (!paramWorkoutId). 
+    // Agora sempre chamamos o serviço para garantir que o banco seja atualizado.
+    await finishWorkoutSession(sessionWorkoutId, hasSavedSets);
+    
+  }, [sessionWorkoutId, groupedWorkout]);
 
   return {
     loading,
@@ -88,6 +90,6 @@ export const useWorkoutSession = (
     groupedWorkout,
     setGroupedWorkout,
     finishWorkout,
-    isProgram, // Exportando a flag
+    isProgram,
   };
 };

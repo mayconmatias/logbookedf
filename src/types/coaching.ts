@@ -1,10 +1,7 @@
-// src/types/coaching.ts
+import { SetType } from './workout';
 
 export type CoachingStatus = 'active' | 'pending' | 'archived';
 
-/**
- * Tabela: coaching_relationships
- */
 export interface CoachingRelationship {
   id: string;
   coach_id: string;
@@ -12,7 +9,6 @@ export interface CoachingRelationship {
   status: CoachingStatus;
   created_at: string;
   
-  // Campos opcionais vindos de Joins (para exibir nomes na UI)
   coach?: {
     display_name: string;
     email: string;
@@ -22,13 +18,9 @@ export interface CoachingRelationship {
     email: string;
   };
 
-  // [NOVO] Campo calculado via service para mostrar status (verde/amarelo/vermelho)
   last_workout_date?: string | null; 
 }
 
-/**
- * Tabela: programs
- */
 export interface Program {
   id: string;
   coach_id: string;
@@ -42,15 +34,15 @@ export interface Program {
   author_name?: string;
   origin_template_id?: string | null;
   
-  // Se houver join com o perfil do coach
+  // [NOVO] Datas de Vigência
+  starts_at?: string | null; // ISO Date '2024-01-01'
+  expires_at?: string | null; // ISO Date '2024-02-01'
+  
   coach?: {
     display_name: string;
   };
 }
 
-/**
- * Tabela: planned_workouts
- */
 export interface PlannedWorkout {
   id: string;
   program_id: string;
@@ -60,9 +52,6 @@ export interface PlannedWorkout {
   exercises?: PlannedExercise[];
 }
 
-/**
- * Tabela: planned_exercises
- */
 export interface PlannedExercise {
   id: string;
   planned_workout_id: string;
@@ -73,10 +62,14 @@ export interface PlannedExercise {
   rpe_target: string | null;
   rest_seconds: number | null;
   notes: string | null;
+  
+  video_url?: string | null;
 
-  // Campos de visualização (joins)
+  set_type?: SetType; 
+
   definition?: {
     name: string;
   };
-  definition_name?: string; // Usado em alguns contextos flat
+  definition_name?: string;
+  is_unilateral?: boolean;
 }

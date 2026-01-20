@@ -3,7 +3,6 @@ import { WorkoutExercise } from '@/types/workout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getLocalYYYYMMDD } from '@/utils/date';
 
-// Importações necessárias para copiar os exercícios
 import { fetchPlannedExercises } from '@/services/workout_planning.service';
 import { instantiateTemplateInWorkout } from '@/services/exercises.service';
 
@@ -11,7 +10,6 @@ const SESSION_KEY = '@sessionWorkoutId';
 
 /**
  * Busca ou cria uma sessão para HOJE.
- * [ATUALIZADO] Agora instancia os exercícios se for um treino novo vindo de um Programa.
  */
 export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<string> => {
   const today = getLocalYYYYMMDD();
@@ -19,12 +17,10 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Usuário não encontrado');
 
-  // 1. Define se é Template ou PlannedWorkout
   let templateColumn = null;
   let plannedColumn = null;
 
   if (originId) {
-    // Verifica se o ID passado é de um 'planned_workout' (Programa)
     const { data: isPlanned } = await supabase
       .from('planned_workouts')
       .select('id')
@@ -34,25 +30,22 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
     if (isPlanned) {
       plannedColumn = originId;
     } else {
-      // Caso contrário, assume que é um template legado ou salvo pelo usuário
       templateColumn = originId;
     }
   }
 
-  // 2. Busca se já existe sessão ABERTA HOJE para este mesmo treino
   let query = supabase
     .from('workouts')
     .select('id')
     .eq('user_id', user.id)
     .eq('workout_date', today)
-    .is('ended_at', null); // [IMPORTANTE] Só pega se NÃO estiver finalizado
+    .is('ended_at', null); 
 
   if (plannedColumn) {
     query = query.eq('planned_workout_id', plannedColumn);
   } else if (templateColumn) {
     query = query.eq('template_id', templateColumn);
   } else {
-    // Treino Livre (sem origem definida)
     query = query.is('template_id', null).is('planned_workout_id', null);
   }
 
@@ -63,13 +56,11 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
 
   if (findError) throw findError;
   
-  // SE JÁ EXISTE UMA SESSÃO ABERTA, RETORNA ELA (Não duplica exercícios)
   if (existingWorkout) {
     await AsyncStorage.setItem(SESSION_KEY, existingWorkout.id);
     return existingWorkout.id;
   }
 
-  // 3. Cria novo treino se não achou sessão ABERTA
   const { data: newWorkout, error: createError } = await supabase
     .from('workouts')
     .insert({
@@ -77,26 +68,18 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
       workout_date: today,
       template_id: templateColumn,
       planned_workout_id: plannedColumn,
-      // ended_at começa nulo por padrão
     })
     .select('id')
     .single();
 
   if (createError) throw createError;
 
-  // 4. [CORREÇÃO CRÍTICA] Se veio de um Programa, COPIAR os exercícios agora!
   if (plannedColumn) {
     try {
-      // Busca os exercícios planejados
       const plannedExercises = await fetchPlannedExercises(plannedColumn);
-      
-      // Instancia eles dentro do treino recém-criado (Copia Definição + Séries/Reps/RPE alvo)
       await instantiateTemplateInWorkout(newWorkout.id, plannedExercises);
-      
     } catch (e) {
       console.error("Erro ao instanciar exercícios do programa:", e);
-      // Não damos throw aqui para não travar a abertura da tela, 
-      // mas o usuário verá um treino vazio se isso falhar.
     }
   }
 
@@ -104,27 +87,92 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
   return newWorkout.id;
 };
 
+/**
+ * [ATUALIZADO] Busca dados agrupados e aplica ordenação rigorosa no JS.
+ * CORREÇÃO: Removemos 'created_at' da query de 'sets' pois a tabela usa 'performed_at'.
+ */
 export const fetchAndGroupWorkoutData = async (
   currentWorkoutId: string
 ): Promise<WorkoutExercise[]> => {
-  const { data, error } = await supabase.rpc('get_workout_data_grouped', {
-    p_workout_id: currentWorkoutId,
-  });
+  
+  const { data, error } = await supabase
+    .from('exercises')
+    .select(`
+      id,
+      definition_id,
+      notes,
+      video_url,
+      is_unilateral,
+      order_in_workout,
+      created_at,
+      substituted_by_id,    
+      is_substitution,      
+      original_exercise_id, 
+      definition:exercise_definitions (
+        name
+      ),
+      sets (
+        id,
+        exercise_id,
+        set_number,
+        weight,
+        reps,
+        rpe,
+        observations,
+        side,
+        performed_at,
+        set_type,
+        parent_set_id
+      )
+    `)
+    .eq('workout_id', currentWorkoutId)
+    .order('order_in_workout', { ascending: true });
 
   if (error) {
     console.error("Erro ao buscar dados do treino:", error.message);
     throw error;
   }
-  const exercises = (data as WorkoutExercise[]).map(ex => ({
-    ...ex,
-    sets: ex.sets || [],
-  }));
+
+  const exercises: WorkoutExercise[] = (data || []).map((ex: any) => {
+    // [CORREÇÃO BUG 3] Ordenação Rigorosa
+    const sortedSets = (ex.sets || []).sort((a: any, b: any) => {
+      // 1. Aquecimento SEMPRE no topo
+      const aIsWarmup = a.set_type === 'warmup';
+      const bIsWarmup = b.set_type === 'warmup';
+      
+      if (aIsWarmup && !bIsWarmup) return -1;
+      if (!aIsWarmup && bIsWarmup) return 1;
+
+      // 2. Número da Série (Principal)
+      if (a.set_number !== b.set_number) {
+        return a.set_number - b.set_number;
+      }
+
+      // 3. Cronologia (Desempate vital para Unilaterais)
+      // Como 'performed_at' tem default NOW() no banco, ele serve como created_at
+      const timeA = new Date(a.performed_at).getTime();
+      const timeB = new Date(b.performed_at).getTime();
+      return timeA - timeB;
+    });
+
+    return {
+      id: ex.id,
+      definition_id: ex.definition_id,
+      name: ex.definition?.name || 'Exercício',
+      notes: ex.notes,
+      video_url: ex.video_url,
+      is_unilateral: ex.is_unilateral,
+      order_in_workout: ex.order_in_workout,
+      substituted_by_id: ex.substituted_by_id,
+      is_substitution: ex.is_substitution,
+      original_exercise_id: ex.original_exercise_id,
+      sets: sortedSets
+    };
+  });
+
   return exercises;
 };
 
-/**
- * [ATUALIZADO] Finaliza a sessão marcando ended_at.
- */
 export const finishWorkoutSession = async (
   sessionWorkoutId: string,
   hasSavedSets: boolean
@@ -134,14 +182,12 @@ export const finishWorkoutSession = async (
   if (!sessionWorkoutId) return;
 
   if (!hasSavedSets) {
-    // Se não tem séries, deleta o treino lixo
     try {
       await supabase.from('workouts').delete().eq('id', sessionWorkoutId);
     } catch (e: any) {
       console.error('Erro ao deletar sessão vazia:', e.message);
     }
   } else {
-    // [IMPORTANTE] Se tem séries, marca como FINALIZADO
     try {
       await supabase
         .from('workouts')
@@ -153,7 +199,6 @@ export const finishWorkoutSession = async (
   }
 };
 
-// [ATUALIZADO] Busca apenas sessão ABERTA para a Home
 export const fetchCurrentOpenSession = async () => {
   const today = getLocalYYYYMMDD();
   
@@ -165,7 +210,7 @@ export const fetchCurrentOpenSession = async () => {
     .select('id, template_id, planned_workout_id') 
     .eq('user_id', user.id)
     .eq('workout_date', today)
-    .is('ended_at', null) // [IMPORTANTE] Ignora os finalizados
+    .is('ended_at', null) 
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -178,27 +223,19 @@ export const fetchCurrentOpenSession = async () => {
   return data; 
 };
 
-/**
- * Busca os dias (índices 0-6) em que houve treino na semana atual.
- * Usado para o WeeklyTracker da Home.
- */
 export const fetchThisWeekWorkoutDays = async (): Promise<number[]> => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  // [CORREÇÃO] Cálculo manual das datas locais para evitar UTC shift
   const curr = new Date();
-  const currentDayIndex = curr.getDay(); // 0 (Dom) a 6 (Sáb)
+  const currentDayIndex = curr.getDay(); 
   
-  // Encontra o Domingo (Início da Semana)
   const startOfWeek = new Date(curr);
   startOfWeek.setDate(curr.getDate() - currentDayIndex);
 
-  // Encontra o Sábado (Fim da Semana)
   const endOfWeek = new Date(startOfWeek);
   endOfWeek.setDate(startOfWeek.getDate() + 6);
 
-  // Helper para formatar YYYY-MM-DD localmente
   const formatLocal = (d: Date) => {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -221,14 +258,18 @@ export const fetchThisWeekWorkoutDays = async (): Promise<number[]> => {
     return [];
   }
 
-  // Converte as datas string 'YYYY-MM-DD' para o índice do dia da semana
   const days = data.map(row => {
     const [y, m, d] = row.workout_date.split('-').map(Number);
-    // Cria a data localmente usando o construtor (mês é base 0)
     const localDate = new Date(y, m - 1, d); 
     return localDate.getDay();
   });
 
-  // Remove duplicatas
   return [...new Set(days)];
+};
+
+export const sanitizeOpenSessions = async () => {
+  const { error } = await supabase.rpc('sanitize_stale_workouts');
+  if (error) {
+    console.error('Erro ao sanitizar sessões antigas:', error.message);
+  }
 };

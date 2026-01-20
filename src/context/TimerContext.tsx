@@ -1,30 +1,21 @@
 import React, { createContext, useState, useEffect, useContext, useRef, useCallback } from 'react';
 import { Platform, Alert } from 'react-native';
-//import * as Haptics from 'expo-haptics';
 import { triggerHaptic } from '@/utils/haptics';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '@/lib/supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { navigate } from '@/utils/navigationRef'; 
 
-// [CORREÇÃO] Configuração Atualizada de Notificações
-try {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      // Mantemos o alert antigo por segurança em versões velhas do Android
-      shouldShowAlert: true,
-      
-      // ADICIONAMOS ESTES DOIS NOVOS:
-      shouldShowAlert: true, // Mantemos por compatibilidade, mas o foco são os de baixo:
+// [CORREÇÃO] Configuração Atualizada de Notificações (Remove warnings)
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: false, // Mantido por compatibilidade
     shouldPlaySound: true,
     shouldSetBadge: false,
-    shouldShowBanner: true, // <--- NOVO: Substitui o alerta intrusivo no iOS
-    shouldShowList: true,
-    }),
-  });
-} catch (e) {
-  console.log("Notifications handler skipped (Expo Go limitations)");
-}
+    shouldShowBanner: true, // [NOVO] Substitui o antigo alert em versões novas
+    shouldShowList: true,   // [NOVO]
+  }),
+});
 
 const PRESETS_KEY = '@timer_presets_v2';
 const DEFAULT_PRESETS = [120, 60, 90]; 
@@ -59,7 +50,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     const initialize = async () => {
       try {
-        // 1. Verifica se é PRO
         let userIsPro = false;
         try {
           const { data: { user } } = await supabase.auth.getUser();
@@ -75,10 +65,9 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
           }
         } catch (err) {
-          console.log("Auth check failed (offline?):", err);
+          console.log("Auth check failed:", err);
         }
 
-        // 2. Carrega Presets
         const savedPresets = await AsyncStorage.getItem(PRESETS_KEY);
         if (savedPresets) {
           const parsed = JSON.parse(savedPresets);
@@ -89,7 +78,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setPresets(DEFAULT_PRESETS);
         }
 
-        // 3. Garante que não-PRO esteja no index 0 (120s)
         if (!userIsPro) {
           setActivePresetIndex(0);
         }
@@ -103,15 +91,11 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const sorted = [...newPresets].sort((a, b) => a - b);
     setPresets(sorted);
     await AsyncStorage.setItem(PRESETS_KEY, JSON.stringify(sorted));
-    
-    if (activePresetIndex >= sorted.length) {
-      setActivePresetIndex(0);
-    }
+    if (activePresetIndex >= sorted.length) setActivePresetIndex(0);
   };
 
   const startTimer = useCallback((seconds?: number) => {
     const duration = seconds || presets[activePresetIndex] || 120;
-    
     const now = Date.now();
     const target = now + (duration * 1000);
 
@@ -119,7 +103,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setIsActive(true);
     notificationScheduled.current = false;
 
-    // Tentativa segura de notificação
     try {
       Notifications.scheduleNotificationAsync({
         content: {
@@ -140,7 +123,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     timerInterval.current = setInterval(() => {
       const currentNow = Date.now();
       const diffInSeconds = Math.ceil((target - currentNow) / 1000);
-      
       setSecondsRemaining(diffInSeconds);
 
       if (diffInSeconds <= 0 && !notificationScheduled.current) {
@@ -151,7 +133,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [presets, activePresetIndex]);
 
   const triggerFinishFeedback = async () => {
-    triggerHaptic('success');
+    triggerHaptic('heavy'); // Feedback mais forte ao terminar
   };
 
   const stopTimer = useCallback(() => {
@@ -165,14 +147,10 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const selectPreset = (index: number) => {
     if (!isPro && index !== 0) {
-       Alert.alert(
-        'Funcionalidade PRO', 
-        'Assine o Coach PRO para usar tempos personalizados.',
-        [
+       Alert.alert('Funcionalidade PRO', 'Assine o Coach PRO para usar tempos personalizados.', [
           { text: 'Cancelar', style: 'cancel' },
           { text: 'Ver Planos', onPress: () => navigate('CoachPaywall') }
-        ]
-      );
+        ]);
       return; 
     }
     setActivePresetIndex(index);
@@ -182,16 +160,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   return (
     <TimerContext.Provider value={{ 
-      secondsRemaining, 
-      isActive, 
-      isOvertime,
-      startTimer, 
-      stopTimer, 
-      activePresetIndex, 
-      presets, 
-      selectPreset,
-      updatePresets,
-      isPro
+      secondsRemaining, isActive, isOvertime, startTimer, stopTimer, 
+      activePresetIndex, presets, selectPreset, updatePresets, isPro
     }}>
       {children}
     </TimerContext.Provider>

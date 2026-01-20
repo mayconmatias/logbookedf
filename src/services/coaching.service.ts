@@ -2,6 +2,16 @@ import { supabase } from '@/lib/supabaseClient';
 import { CoachingRelationship } from '@/types/coaching';
 import { WorkoutHistoryItem } from '@/types/workout';
 
+// Tipagem para mensagens
+export interface CoachingMessage {
+  id: string;
+  relationship_id: string;
+  sender_id: string;
+  content: string;
+  created_at: string;
+  is_read: boolean;
+}
+
 /**
  * Busca alunos vinculados e a data do último treino realizado.
  */
@@ -26,8 +36,7 @@ export const fetchMyStudents = async (): Promise<CoachingRelationship[]> => {
     .select('id, display_name, email')
     .in('id', studentIds);
 
-  // 3. [NOVO] Busca o último treino de cada aluno
-  // Usamos uma query agregada ou buscamos o último workout de cada ID
+  // 3. Busca o último treino de cada aluno
   const { data: lastWorkouts } = await supabase
     .from('workouts')
     .select('user_id, workout_date')
@@ -39,6 +48,7 @@ export const fetchMyStudents = async (): Promise<CoachingRelationship[]> => {
     const profile = profiles?.find(p => p.id === rel.student_id);
     
     // Encontra o treino mais recente desse aluno
+    // Nota: Como a query retorna todos, precisamos filtrar ou pegar o primeiro encontrado se ordenado
     const lastWorkout = lastWorkouts?.find(w => w.user_id === rel.student_id);
     
     return {
@@ -47,7 +57,6 @@ export const fetchMyStudents = async (): Promise<CoachingRelationship[]> => {
         display_name: profile.display_name || 'Sem nome',
         email: profile.email || ''
       } : { display_name: 'Usuário desconhecido', email: '' },
-      // Adicionamos essa prop dinamicamente (você pode adicionar no tipo CoachingRelationship se quiser tipagem estrita)
       last_workout_date: lastWorkout?.workout_date || null
     };
   });
@@ -56,56 +65,68 @@ export const fetchMyStudents = async (): Promise<CoachingRelationship[]> => {
 };
 
 /**
- * Convida um aluno pelo E-mail.
- * Requer que o aluno já tenha cadastro no app (exista na tabela profiles).
+ * Convite Inteligente:
+ * 1. Verifica se o aluno já existe no banco.
+ * 2. Se EXISTE: Vincula direto na tabela `coaching_relationships`.
+ * 3. Se NÃO EXISTE: Chama a Edge Function para enviar e-mail de convite.
  */
 export const inviteStudentByEmail = async (email: string) => {
   const emailTrimmed = email.trim().toLowerCase();
 
-  // 1. Encontrar o ID do aluno pelo email (na tabela profiles)
+  // 1. Tenta encontrar usuário existente pelo RPC seguro
   const { data: foundUsers, error: searchError } = await supabase
-    .rpc('get_profile_summary_by_email', {
-      p_email: emailTrimmed
-    });
+    .rpc('get_profile_summary_by_email', { p_email: emailTrimmed });
 
-  if (searchError) {
-    throw new Error('Erro ao buscar aluno: ' + searchError.message);
-  }
+  if (searchError) throw new Error(searchError.message);
 
-  // A RPC retorna um array (tabela), pegamos o primeiro item
   const profile = foundUsers && foundUsers.length > 0 ? foundUsers[0] : null;
 
-  if (!profile) {
-    throw new Error('Aluno não encontrado. Verifique o e-mail ou peça para ele se cadastrar.');
+  // --- CASO A: Usuário JÁ EXISTE no app ---
+  if (profile) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.id === profile.id) throw new Error('Você não pode convidar a si mesmo.');
+
+    const { error: insertError } = await supabase
+      .from('coaching_relationships')
+      .insert({
+        coach_id: user?.id,
+        student_id: profile.id,
+        status: 'active'
+      });
+
+    if (insertError) {
+      if (insertError.code === '23505') throw new Error('Este aluno já está vinculado a você.');
+      throw insertError;
+    }
+    return { status: 'linked', message: `O aluno ${profile.display_name} foi vinculado com sucesso!` };
   }
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Você não está logado.');
+  // --- CASO B: Usuário NÃO EXISTE (Novo Fluxo de Convite) ---
+  else {
+    // Busca nome do coach para personalizar o e-mail
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data: coachProfile } = await supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('id', user?.id)
+      .single();
+    
+    const coachName = coachProfile?.display_name || 'Seu Treinador';
 
-  if (profile.id === user.id) {
-    throw new Error('Você não pode ser seu próprio aluno.');
-  }
-
-  // 2. Criar o relacionamento
-  const { error: insertError } = await supabase
-    .from('coaching_relationships')
-    .insert({
-      coach_id: user.id,
-      student_id: profile.id,
-      status: 'active' // MVP: Já cria como ativo. No futuro pode ser 'pending'.
+    // Chama a Edge Function para registrar convite e enviar e-mail
+    const { data, error } = await supabase.functions.invoke('invite-student', {
+      body: { email: emailTrimmed, coachName }
     });
 
-  if (insertError) {
-    if (insertError.code === '23505') { // Unique violation
-      throw new Error('Este aluno já está na sua lista.');
-    }
-    throw insertError;
+    if (error) throw new Error('Erro ao enviar convite: ' + error.message);
+    if (data?.error) throw new Error(data.error);
+
+    return { status: 'invited', message: `Convite enviado para ${emailTrimmed}. O aluno aparecerá aqui assim que criar a conta.` };
   }
 };
 
 /**
  * Busca o histórico de treinos realizados de um aluno específico.
- * (O Coach tem permissão para ver isso graças à policy que criamos).
  */
 export const fetchStudentHistory = async (studentId: string): Promise<WorkoutHistoryItem[]> => {
   const { data, error } = await supabase
@@ -120,15 +141,13 @@ export const fetchStudentHistory = async (studentId: string): Promise<WorkoutHis
         sets ( weight, reps, rpe ) 
       )
     `)
-    .eq('user_id', studentId) // Filtra pelo ID do aluno
-    .order('workout_date', { ascending: false }) // Mais recentes primeiro
-    .limit(20); // Limita para não pesar
+    .eq('user_id', studentId)
+    .order('workout_date', { ascending: false })
+    .limit(20);
 
   if (error) throw error;
 
-  // Formata para o tipo WorkoutHistoryItem
   return data.map((workout: any) => {
-    // Tenta identificar o nome do treino (se veio de template ou data)
     const [year, month, day] = workout.workout_date.split('-');
     const formattedDate = `${day}/${month}`;
 
@@ -136,7 +155,7 @@ export const fetchStudentHistory = async (studentId: string): Promise<WorkoutHis
       id: workout.id,
       workout_date: workout.workout_date,
       user_id: studentId,
-      template_name: `Treino de ${formattedDate}`, // Nome simplificado
+      template_name: `Treino de ${formattedDate}`,
       performed_data: workout.exercises.map((ex: any) => ({
         id: ex.id,
         definition_id: ex.definition_id,
@@ -158,15 +177,6 @@ export const fetchStudentUniqueExercises = async (studentId: string) => {
   if (error) throw error;
   return data as { definition_id: string; name: string }[] || [];
 };
-
-export interface CoachingMessage {
-  id: string;
-  relationship_id: string;
-  sender_id: string;
-  content: string;
-  created_at: string;
-  is_read: boolean;
-}
 
 /**
  * Busca a mensagem mais recente para exibir no topo do Dashboard.
@@ -192,7 +202,7 @@ export const fetchMessageHistory = async (relationshipId: string): Promise<Coach
     .from('coaching_messages')
     .select('*')
     .eq('relationship_id', relationshipId)
-    .order('created_at', { ascending: false }); // Mais recentes primeiro
+    .order('created_at', { ascending: false });
 
   if (error) throw error;
   return data || [];
@@ -212,8 +222,6 @@ export const sendCoachingMessage = async (relationshipId: string, content: strin
   if (error) throw error;
 };
 
-// Adicione ao final do arquivo src/services/coaching.service.ts
-
 /**
  * Busca a última mensagem NÃO LIDA enviada pelo TREINADOR para o aluno logado.
  */
@@ -221,7 +229,6 @@ export const fetchUnreadCoachMessage = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // 1. Acha o relacionamento ativo onde sou aluno
   const { data: rel } = await supabase
     .from('coaching_relationships')
     .select('id')
@@ -231,13 +238,12 @@ export const fetchUnreadCoachMessage = async () => {
 
   if (!rel) return null;
 
-  // 2. Busca mensagem não lida que NÃO fui eu que enviei (logo, foi o coach)
   const { data: msg } = await supabase
     .from('coaching_messages')
     .select('*')
     .eq('relationship_id', rel.id)
-    .neq('sender_id', user.id) // Garante que não é msg minha
-    .eq('is_read', false)      // Apenas não lidas
+    .neq('sender_id', user.id)
+    .eq('is_read', false)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -246,7 +252,7 @@ export const fetchUnreadCoachMessage = async () => {
 };
 
 /**
- * Marca uma mensagem como lida (Dismiss)
+ * Marca uma mensagem como lida.
  */
 export const markMessageAsRead = async (messageId: string) => {
   const { error } = await supabase

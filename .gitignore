@@ -1,4 +1,9 @@
-node_modules
+node_modules/
 .expo/
-app.json
-node_modules
+dist/
+web-build/
+*.apk
+*.aab
+*.keystore
+.DS_Store*.aab
+*.apk

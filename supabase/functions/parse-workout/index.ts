@@ -7,65 +7,67 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// [CORREÇÃO] Tipagem explícita para 'req'
 serve(async (req: Request) => {
-  // 1. Handle CORS (Preflight request)
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
     const { text } = await req.json()
     
-    // 2. Setup Supabase Client
+    // Setup Supabase
     const authHeader = req.headers.get('Authorization')!
-    
-    // [CORREÇÃO] Deno é global no ambiente Edge, o VSCode reclama mas funciona no deploy
     // @ts-ignore
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     // @ts-ignore
     const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-    
-    const supabaseClient = createClient(
-      supabaseUrl,
-      supabaseKey,
-      { global: { headers: { Authorization: authHeader } } }
-    )
+    const supabaseClient = createClient(supabaseUrl, supabaseKey, { global: { headers: { Authorization: authHeader } } })
 
-    // 3. Buscar exercícios existentes
+    // Busca contexto de exercícios (Limitado para economia)
     const { data: existingExercises } = await supabaseClient
       .from('exercise_definitions')
       .select('id, name')
-      .order('name', { ascending: true });
+      .order('name', { ascending: true })
+      .limit(300);
 
-    // [CORREÇÃO] Tipagem no map
     const exercisesListString = existingExercises 
       ? existingExercises.map((e: any) => `${e.name} (ID: ${e.id})`).join(', ')
       : '';
 
-    // 4. Preparar o Prompt
+    // PROMPT ATUALIZADO PARA PROGRAMAS COMPLETOS
     const systemPrompt = `
-      Você é um assistente especialista em educação física. Sua tarefa é converter texto livre de treinos em JSON estruturado.
-      
-      Instruções:
-      1. Identifique os exercícios, séries, repetições (range ou fixo), RPE e notas técnicas.
-      2. Tente combinar o nome do exercício com esta lista existente: [${exercisesListString}].
-      3. Se encontrar um match na lista (mesmo que aproximado), use o "definition_id" correspondente e o nome exato da lista.
-      4. Se NÃO encontrar, deixe "definition_id" null e use o nome extraído do texto.
-      5. Retorne APENAS um JSON válido no formato: 
-      [
-        {
-          "definition_id": "uuid" | null,
-          "name": "string",
-          "sets": number,
-          "reps": "string",
-          "rpe": "string" | null,
-          "notes": "string" | null
-        }
-      ]
+      Você é um expert em Educação Física. Sua tarefa é estruturar programas de treino completos a partir de texto livre.
+
+      Contexto de Exercícios Disponíveis: [${exercisesListString}]
+
+      INSTRUÇÕES:
+      1. Identifique se o texto contém um ou múltiplos treinos (Ex: "Treino A", "Treino B", "Segunda", "Terça").
+      2. Agrupe os exercícios dentro de seus respectivos treinos.
+      3. Para cada exercício, tente encontrar o ID correspondente na lista fornecida.
+      4. Detecte técnicas avançadas no campo "set_type" ("drop", "warmup", "rest_pause", "cluster", "biset", "triset", "normal").
+      5. Se o texto não especificar divisões de dias, assuma que é um "Treino Único".
+
+      Retorne APENAS um JSON com esta estrutura:
+      {
+        "program_name": "Sugestão de nome para o programa",
+        "days": [
+          {
+            "day_name": "Nome do dia (ex: Treino A - Peito)",
+            "exercises": [
+              {
+                "definition_id": "uuid" | null,
+                "name": "Nome do exercício",
+                "sets": number,
+                "reps": "string",
+                "rpe": "string" | null,
+                "notes": "string" | null,
+                "set_type": "normal" | "drop" | "warmup" | "rest_pause",
+                "is_unilateral": boolean
+              }
+            ]
+          }
+        ]
+      }
     `
 
-    // 5. Chamar OpenAI
     // @ts-ignore
     const openAIKey = Deno.env.get('OPENAI_API_KEY');
     
@@ -81,31 +83,24 @@ serve(async (req: Request) => {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: text }
         ],
-        temperature: 0.1
+        temperature: 0.1,
+        response_format: { type: "json_object" }
       })
     })
 
     const aiData = await openAIResponse.json()
-    
-    // Tratamento de erro da OpenAI
-    if (aiData.error) {
-        throw new Error(aiData.error.message);
-    }
+    if (aiData.error) throw new Error(aiData.error.message);
 
     const rawContent = aiData.choices[0].message.content
+    const parsedData = JSON.parse(rawContent);
 
-    const jsonString = rawContent.replace(/```json/g, '').replace(/```/g, '').trim()
-    const parsedWorkout = JSON.parse(jsonString)
-
-    return new Response(JSON.stringify({ data: parsedWorkout }), {
+    return new Response(JSON.stringify({ data: parsedData }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 200,
     })
 
-  } catch (error: any) { // [CORREÇÃO] Tipagem do erro como 'any' para acessar .message
-    const errorMessage = error?.message || 'Erro desconhecido na Edge Function';
-    
-    return new Response(JSON.stringify({ error: errorMessage }), {
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error?.message || 'Erro' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 400,
     })

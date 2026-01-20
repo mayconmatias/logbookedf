@@ -1,281 +1,117 @@
-import React, {
-  useState,
-  forwardRef,
-  useImperativeHandle,
-  useRef,
-  useMemo
-} from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  TouchableOpacity,
-  Dimensions,
-  ScrollView,
-  Platform,
-  UIManager,
-} from 'react-native';
+import React, { useState, forwardRef, useImperativeHandle, useRef } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Dimensions, ScrollView } from 'react-native';
 import { TrueSheet } from '@lodev09/react-native-true-sheet';
 import { Feather } from '@expo/vector-icons';
-import { toast } from 'sonner-native';
-import moment from 'moment';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useSharedValue, withTiming, runOnJS } from 'react-native-reanimated';
-
-// SKIA & D3
-import { 
-  Canvas, Path, LinearGradient as SkiaLinearGradient, vec, Circle, Line, Group, Skia, Rect
-} from "@shopify/react-native-skia";
+import { LinearGradient } from 'expo-linear-gradient';
+import { Canvas, Path, Circle, Line, vec, Skia } from "@shopify/react-native-skia";
 import * as d3 from "d3";
+import moment from 'moment';
 
-import { fetchExerciseAnalytics } from '@/services/progression.service';
-import { fetchPerformancePeek } from '@/services/exercises.service';
-import { ExerciseAnalyticsData, CurrentBestSet, ChartDataPoint } from '@/types/analytics';
-import { PerformanceSet } from '@/types/workout';
+import { supabase } from '@/lib/supabaseClient';
+import { ExerciseAnalyticsDataV2 } from '@/types/analytics';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const GRAPH_HEIGHT = 200;
+const CARD_WIDTH = SCREEN_WIDTH * 0.44;
 
 export type ExerciseAnalyticsSheetRef = {
-  openSheet: (
-    definitionId: string,
-    exerciseName: string,
-    currentBestSet?: CurrentBestSet | null,
-    studentId?: string,
-    excludeWorkoutId?: string
-  ) => void;
+  openSheet: (defId: string, name: string, studentId?: string) => void;
   close: () => void;
 };
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-const GRAPH_HEIGHT = 240;
-const CHART_TOP_PADDING = 30;
-const CHART_BOTTOM_PADDING = 30; // Espaço para datas
-const AVAILABLE_HEIGHT = GRAPH_HEIGHT - CHART_TOP_PADDING - CHART_BOTTOM_PADDING;
-const POINT_WIDTH = 70; // Mais largo para caber rótulos
+// --- SUB-COMPONENTES ---
 
-// --- NOVO GRÁFICO PROFISSIONAL ---
-const ProChart = ({ 
-  data, 
-  color, 
-  type = 'line',
-  unit,
-  currentBest 
-}: { 
-  data: ChartDataPoint[], 
-  color: string, 
-  type?: 'line' | 'scatter',
-  unit: string,
-  currentBest?: CurrentBestSet | null
-}) => {
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const opacity = useSharedValue(0);
+const StatusCard = ({ status }: { status: string }) => {
+  let color = '#718096';
+  let bg = ['#EDF2F7', '#E2E8F0'];
+  let icon: any = 'help-circle';
+  let title = 'Analisando...';
+  let desc = 'Dados insuficientes.';
 
-  // 1. Dados
-  const chartData = useMemo(() => {
-    const baseData = [...data];
-    if (currentBest && currentBest.e1rm > 0) {
-      baseData.push({
-        date: new Date().toISOString(),
-        value: currentBest.e1rm
-      });
-    }
-    return baseData;
-  }, [data, currentBest]);
+  if (status === 'progressing') {
+    color = '#2F855A';
+    bg = ['#F0FFF4', '#C6F6D5'];
+    icon = 'trending-up';
+    title = 'Evoluindo! 🚀';
+    desc = 'Carga e repetições subindo consistentemente.';
+  } else if (status === 'stagnated') {
+    color = '#D69E2E';
+    bg = ['#FFFFF0', '#FEFCBF'];
+    icon = 'minus';
+    title = 'Estável ⚓';
+    desc = 'Manutenção de carga. Tente variar o estímulo.';
+  } else if (status === 'regressing') {
+    color = '#C53030';
+    bg = ['#FFF5F5', '#FED7D7'];
+    icon = 'trending-down';
+    title = 'Atenção 📉';
+    desc = 'Volume caindo. Verifique sua recuperação.';
+  }
 
-  if (!chartData || chartData.length === 0) {
+  return (
+    <LinearGradient colors={bg as any} style={[styles.statusCard, { borderColor: color }]}>
+      <View style={styles.cardIconRow}>
+        <Feather name={icon} size={24} color={color} />
+        <Text style={[styles.cardTag, { color }]}>STATUS ATUAL</Text>
+      </View>
+      <Text style={[styles.cardTitle, { color }]}>{title}</Text>
+      <Text style={[styles.cardDesc, { color }]}>{desc}</Text>
+    </LinearGradient>
+  );
+};
+
+const ProgressionCard = ({ data }: { data: ExerciseAnalyticsDataV2['last_progression'] }) => {
+  if (!data || !data.date) {
     return (
-      <View style={styles.chartPlaceholder}>
-        <Feather name="bar-chart-2" size={32} color="#CBD5E0" />
-        <Text style={styles.placeholderText}>Histórico insuficiente.</Text>
+      <View style={[styles.statusCard, { backgroundColor: '#F7FAFC', borderColor: '#E2E8F0' }]}>
+        <Feather name="clock" size={24} color="#A0AEC0" />
+        <Text style={[styles.cardTitle, { color: '#718096', marginTop: 8 }]}>Sem dados</Text>
+        <Text style={styles.cardDesc}>Ainda não detectamos um padrão de progressão claro.</Text>
       </View>
     );
   }
 
-  const isSinglePoint = chartData.length === 1;
-  // Ponto fantasma para D3 não quebrar se for único
-  const renderData = isSinglePoint ? [chartData[0], chartData[0]] : chartData;
-
-  const totalWidth = Math.max(SCREEN_WIDTH - 60, chartData.length * POINT_WIDTH); // -60 para dar espaço ao Eixo Y fixo
-
-  // 2. Escalas
-  const yValues = chartData.map(d => d.value);
-  const yMax = Math.max(...yValues) * 1.1; 
-  const yMin = Math.min(...yValues) * 0.9;
-
-  const xScale = d3.scaleLinear()
-    .domain([0, isSinglePoint ? 1 : chartData.length - 1])
-    .range([POINT_WIDTH / 2, totalWidth - (POINT_WIDTH / 2)]);
-
-  const yScale = d3.scaleLinear()
-    .domain([yMin > 0 ? yMin : 0, yMax || 10])
-    .range([AVAILABLE_HEIGHT, 0]); // Invertido: 0 no topo (maior valor), Height na base
-
-  // Ticks do Eixo Y (5 divisões)
-  const yTicks = yScale.ticks(5);
-
-  // Geradores SVG
-  const lineGenerator = d3.line<any>()
-    .x((_, i) => xScale(i))
-    .y(d => yScale(d.value) + CHART_TOP_PADDING)
-    .curve(d3.curveMonotoneX);
-
-  const areaGenerator = d3.area<any>()
-    .x((_, i) => xScale(i))
-    .y0(AVAILABLE_HEIGHT + CHART_TOP_PADDING)
-    .y1(d => yScale(d.value) + CHART_TOP_PADDING)
-    .curve(d3.curveMonotoneX);
-
-  const linePath = Skia.Path.MakeFromSVGString(lineGenerator(renderData) || "")!;
-  const areaPath = Skia.Path.MakeFromSVGString(areaGenerator(renderData) || "")!;
-
-  // Gesto
-  const gesture = Gesture.Pan()
-    .onBegin(() => opacity.value = withTiming(1))
-    .onUpdate((e) => {
-      if (isSinglePoint) { runOnJS(setActiveIndex)(0); return; }
-      const relativeX = e.x - (POINT_WIDTH / 2);
-      const usefulWidth = totalWidth - POINT_WIDTH;
-      const progress = Math.max(0, Math.min(1, relativeX / usefulWidth));
-      const idx = Math.round(progress * (chartData.length - 1));
-      if (idx >= 0 && idx < chartData.length) runOnJS(setActiveIndex)(idx);
-    })
-    .onFinalize(() => { opacity.value = withTiming(0); runOnJS(setActiveIndex)(null); });
-
-  const activePoint = activeIndex !== null ? chartData[activeIndex] : null;
-
   return (
-    <View style={styles.chartRow}>
-      {/* EIXO Y FIXO (Esquerda) */}
-      <View style={styles.yAxisContainer}>
-        {yTicks.map((tick, i) => (
-          <Text key={i} style={[styles.yAxisLabel, { 
-            position: 'absolute', 
-            top: yScale(tick) + CHART_TOP_PADDING - 6 // Centraliza verticalmente com a linha
-          }]}>
-            {tick >= 1000 ? `${(tick/1000).toFixed(1)}k` : Math.round(tick)}
-          </Text>
-        ))}
+    <LinearGradient colors={['#EBF8FF', '#BEE3F8']} style={[styles.statusCard, { borderColor: '#3182CE' }]}>
+      <View style={styles.cardIconRow}>
+        <Feather name="award" size={24} color="#3182CE" />
+        <Text style={[styles.cardTag, { color: '#2B6CB0' }]}>ÚLTIMO PR</Text>
       </View>
-
-      {/* ÁREA DE SCROLL (Gráfico) */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
-        <GestureDetector gesture={gesture}>
-          <View>
-            {/* 1. LAYOUT DE TEXTO (Rótulos e Datas) - Fora do Canvas para nitidez */}
-            <View style={{ width: totalWidth, height: GRAPH_HEIGHT, position: 'absolute', zIndex: 1 }}>
-               {chartData.map((d, i) => {
-                 const xPos = xScale(i);
-                 const yPos = yScale(d.value) + CHART_TOP_PADDING;
-                 const isToday = moment(d.date).isSame(new Date(), 'day');
-                 const isHigh = activeIndex === i;
-
-                 return (
-                   <React.Fragment key={i}>
-                     {/* Rótulo de Valor (Acima do ponto) */}
-                     <View style={[styles.pointLabelContainer, { left: xPos - 30, top: yPos - 24 }]}>
-                        <Text style={[styles.pointLabel, isHigh && { color, fontWeight: '900', fontSize: 13 }]}>
-                          {Math.round(d.value)}
-                        </Text>
-                     </View>
-
-                     {/* Rótulo de Data (Eixo X) */}
-                     <View style={[styles.dateLabelContainer, { left: xPos - 25, bottom: 2 }]}>
-                        <Text style={[styles.dateLabel, isToday && { color, fontWeight: '800' }]}>
-                          {isToday ? 'HOJE' : moment(d.date).format('DD/MM')}
-                        </Text>
-                     </View>
-                   </React.Fragment>
-                 )
-               })}
-            </View>
-
-            {/* 2. DESENHO GRÁFICO (Canvas) */}
-            <View style={{ width: totalWidth, height: GRAPH_HEIGHT }}>
-              <Canvas style={{ flex: 1 }}>
-                {/* Linhas de Grade Horizontais */}
-                {yTicks.map((tick, i) => (
-                  <Line 
-                    key={`grid-${i}`} 
-                    p1={vec(0, yScale(tick) + CHART_TOP_PADDING)} 
-                    p2={vec(totalWidth, yScale(tick) + CHART_TOP_PADDING)} 
-                    color="#F0F0F0" 
-                    strokeWidth={1} 
-                  />
-                ))}
-
-                {isSinglePoint ? (
-                   <Group>
-                      {/* Linha de referência visual para ponto único */}
-                      <Line 
-                        p1={vec(0, yScale(chartData[0].value) + CHART_TOP_PADDING)} 
-                        p2={vec(totalWidth, yScale(chartData[0].value) + CHART_TOP_PADDING)} 
-                        color={color} 
-                        style="stroke" 
-                        strokeWidth={1} 
-                      >
-                         <SkiaLinearGradient start={vec(0,0)} end={vec(totalWidth,0)} colors={['transparent', color, 'transparent']} />
-                      </Line>
-                      <Circle cx={totalWidth/2} cy={yScale(chartData[0].value) + CHART_TOP_PADDING} r={6} color={color} />
-                      <Circle cx={totalWidth/2} cy={yScale(chartData[0].value) + CHART_TOP_PADDING} r={3} color="#FFF" />
-                   </Group>
-                ) : (
-                  <>
-                    {type === 'line' && (
-                      <Path path={areaPath}>
-                        <SkiaLinearGradient start={vec(0, CHART_TOP_PADDING)} end={vec(0, GRAPH_HEIGHT)} colors={[color + '33', color + '00']} />
-                      </Path>
-                    )}
-                    {type === 'line' && (
-                      <Path path={linePath} color={color} style="stroke" strokeWidth={3} strokeCap="round" />
-                    )}
-                    {chartData.map((d, i) => (
-                      <Group key={i}>
-                        <Circle cx={xScale(i)} cy={yScale(d.value) + CHART_TOP_PADDING} r={4} color={color} />
-                        <Circle cx={xScale(i)} cy={yScale(d.value) + CHART_TOP_PADDING} r={2} color="#FFF" />
-                      </Group>
-                    ))}
-                  </>
-                )}
-
-                {/* Cursor de Interação */}
-                {activeIndex !== null && (
-                  <Line 
-                    p1={vec(xScale(activeIndex), CHART_TOP_PADDING)} 
-                    p2={vec(xScale(activeIndex), AVAILABLE_HEIGHT + CHART_TOP_PADDING)} 
-                    color={color} 
-                    strokeWidth={1}
-                    style="stroke" 
-                  />
-                )}
-              </Canvas>
-            </View>
-          </View>
-        </GestureDetector>
-      </ScrollView>
-    </View>
+      <Text style={[styles.cardTitle, { color: '#2C5282' }]}>
+        {data.days_ago === 0 ? 'Hoje!' : `Há ${data.days_ago} dias`}
+      </Text>
+      <Text style={[styles.cardDesc, { color: '#2C5282' }]}>
+        Você superou sua marca anterior em {moment(data.date).format('DD/MM')}.
+      </Text>
+    </LinearGradient>
   );
 };
 
-// --- (CÓDIGO EXISTENTE: MotivationHeader, LastSessionList) ---
-const MotivationHeader = ({ analytics }: { analytics: ExerciseAnalyticsData }) => {
-  const { prStreakCount, daysSinceLastPR } = analytics;
-  if (prStreakCount >= 2) return <View style={[styles.insightCard, styles.insightGreen]}><Feather name="trending-up" size={24} color="#2F855A" /><View style={{flex:1}}><Text style={[styles.insightTitle, {color:'#22543D'}]}>Em chamas! 🔥</Text><Text style={[styles.insightText, {color:'#2F855A'}]}>Recordes em {prStreakCount} treinos seguidos.</Text></View></View>;
-  if (daysSinceLastPR > 30) return <View style={[styles.insightCard, styles.insightRed]}><Feather name="alert-circle" size={24} color="#C53030" /><View style={{flex:1}}><Text style={[styles.insightTitle, {color:'#742A2A'}]}>Quebrar platô? 🔨</Text><Text style={[styles.insightText, {color:'#C53030'}]}>Faz {daysSinceLastPR} dias do último PR.</Text></View></View>;
-  return <View style={[styles.insightCard, styles.insightBlue]}><Feather name="activity" size={24} color="#2B6CB0" /><View style={{flex:1}}><Text style={[styles.insightTitle, {color:'#2A4365'}]}>Construindo base 🏗️</Text><Text style={[styles.insightText, {color:'#2B6CB0'}]}>Mantenha a consistência.</Text></View></View>;
-};
+const InfoRow = ({ icon, label, value }: any) => (
+  <View style={styles.infoRow}>
+    <View style={styles.infoIconBox}>
+      <Feather name={icon} size={18} color="#4A5568" />
+    </View>
+    <View>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
+    </View>
+  </View>
+);
 
-const LastSessionList = ({ sets }: { sets: PerformanceSet[] }) => {
-  const validSets = sets.filter(s => s.weight > 0 || s.reps > 0);
-  if (validSets.length === 0) return <View style={styles.emptyContainer}><Text style={styles.emptyText}>Sem dados válidos da última sessão.</Text></View>;
+const LastSessionRecap = ({ sets }: { sets: ExerciseAnalyticsDataV2['last_session_sets'] }) => {
+  if (!sets || sets.length === 0) return null;
+
   return (
     <View style={styles.lastSessionContainer}>
-      {validSets.map((set, idx) => (
-        <View key={idx} style={styles.lastSessionRow}>
-          <View style={styles.setIndexBadge}><Text style={styles.setIndexText}>#{set.set_number}</Text></View>
-          <View style={styles.setMainInfo}><Text style={styles.setWeight}>{set.weight} <Text style={styles.unit}>kg</Text></Text><Text style={styles.setX}>×</Text><Text style={styles.setReps}>{set.reps} <Text style={styles.unit}>reps</Text></Text></View>
+      <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8}}>
+         <Feather name="rotate-ccw" size={16} color="#718096" />
+         <Text style={styles.sectionTitle}>Sessão Anterior</Text>
+      </View>
+      {sets.map((set, i) => (
+        <View key={i} style={styles.setRow}>
+          <View style={styles.setBadge}><Text style={styles.setIndexText}>#{set.set_number}</Text></View>
+          <Text style={styles.setMainText}>{set.weight}kg <Text style={{color:'#CBD5E0'}}>x</Text> {set.reps}</Text>
           {set.rpe && <View style={styles.rpeBadge}><Text style={styles.rpeText}>@{set.rpe}</Text></View>}
         </View>
       ))}
@@ -283,178 +119,184 @@ const LastSessionList = ({ sets }: { sets: PerformanceSet[] }) => {
   );
 };
 
+// GRÁFICO GENÉRICO DE LINHA
+const SimpleLineChart = ({ data, color, yKey }: { data: any[], color: string, yKey: string }) => {
+  if (!data || data.length < 2) return <Text style={styles.errorText}>Dados insuficientes para gráfico.</Text>;
+
+  const ITEM_WIDTH = 60;
+  const width = Math.max(SCREEN_WIDTH - 40, data.length * ITEM_WIDTH);
+  const height = GRAPH_HEIGHT;
+  const padding = 20;
+
+  const values = data.map(d => d[yKey]);
+  const yMax = Math.max(...values) * 1.1;
+  const yMin = Math.min(...values) * 0.9;
+
+  const xScale = d3.scaleLinear().domain([0, data.length - 1]).range([padding, width - padding]);
+  const yScale = d3.scaleLinear().domain([yMin, yMax]).range([height - padding, padding]);
+
+  const line = d3.line<any>().x((_, i) => xScale(i)).y(d => yScale(d[yKey])).curve(d3.curveMonotoneX)(data);
+  const path = Skia.Path.MakeFromSVGString(line || "")!;
+
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <View style={{ width, height }}>
+        <Canvas style={{ flex: 1 }}>
+          <Path path={path} color={color} style="stroke" strokeWidth={3} strokeCap="round" />
+          {data.map((d, i) => (
+            <React.Fragment key={i}>
+              <Circle cx={xScale(i)} cy={yScale(d[yKey])} r={4} color={color} />
+            </React.Fragment>
+          ))}
+        </Canvas>
+        {data.map((d, i) => (
+          <View key={i} style={{ position: 'absolute', left: xScale(i) - 20, top: yScale(d[yKey]) - 25, width: 40, alignItems: 'center' }}>
+            <Text style={{ fontSize: 10, fontWeight: '700', color: '#2D3748' }}>{Math.round(d[yKey])}</Text>
+            <Text style={{ fontSize: 9, color: '#A0AEC0', marginTop: height - yScale(d[yKey]) + 25 }}>{moment(d.date).format('DD/MM')}</Text>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+};
+
 export const ExerciseAnalyticsSheet = forwardRef<ExerciseAnalyticsSheetRef, {}>((props, ref) => {
   const sheetRef = useRef<TrueSheet>(null);
   const [loading, setLoading] = useState(false);
-  const [analytics, setAnalytics] = useState<ExerciseAnalyticsData | null>(null);
-  const [lastSessionSets, setLastSessionSets] = useState<PerformanceSet[]>([]);
+  const [data, setData] = useState<ExerciseAnalyticsDataV2 | null>(null);
   const [title, setTitle] = useState('');
-  const [chartMode, setChartMode] = useState<'force' | 'volume'>('force');
-  const [currentBest, setCurrentBest] = useState<CurrentBestSet | null>(null);
 
-  const loadData = async (definitionId: string, studentId?: string, excludeWorkoutId?: string) => {
+  const loadData = async (defId: string, studentId?: string) => {
     setLoading(true);
     try {
-      const data = await fetchExerciseAnalytics(definitionId, studentId);
-      setAnalytics(data);
-      
-      const peek = await fetchPerformancePeek(definitionId, excludeWorkoutId, studentId);
-      // Fallback Visual: Se a última sessão retornada for a de HOJE e estiver vazia, tenta pegar a anterior real
-      const isTodayEmpty = peek.lastPerformance.some(s => moment(s.workout_date).isSame(moment(), 'day') && s.weight === 0);
-      
-      if (isTodayEmpty && data.bestSetPreviousSession) {
-         setLastSessionSets([]); // Ou lógica de fallback mais complexa se desejar
-      } else {
-         setLastSessionSets(peek.lastPerformance || []);
-      }
+      const { data: res, error } = await supabase.rpc('get_exercise_analytics_v2', {
+        p_definition_id: defId,
+        p_target_user_id: studentId || null
+      });
+      if (error) throw error;
+      setData(res as ExerciseAnalyticsDataV2);
     } catch (e) {
-      toast.error('Erro ao carregar histórico.');
+      console.log(e);
     } finally {
       setLoading(false);
     }
   };
 
   useImperativeHandle(ref, () => ({
-    openSheet: (defId, name, current, studentId, excludeWorkoutId) => {
+    openSheet: (defId, name, studentId) => {
       setTitle(name);
-      setCurrentBest(current || null);
       sheetRef.current?.present(0);
-      if (defId) loadData(defId, studentId, excludeWorkoutId);
+      loadData(defId, studentId);
     },
     close: () => sheetRef.current?.dismiss(),
   }));
 
   const renderContent = () => {
-    if (loading) return <ActivityIndicator style={{marginTop: 60}} size="large" color="#007AFF" />;
-    if (!analytics) return <View style={styles.emptyContainer}><Text style={styles.emptyText}>Não foi possível carregar os dados.</Text></View>;
+    if (loading) return <ActivityIndicator style={{ marginTop: 50 }} size="large" color="#007AFF" />;
+    if (!data) return <Text style={styles.errorText}>Não foi possível carregar os dados.</Text>;
 
     return (
-      <ScrollView contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-        <MotivationHeader analytics={analytics} />
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         
-        {/* SESSÃO ANTERIOR */}
-        <View style={styles.section}>
-          <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8}}>
-             <Feather name="rotate-ccw" size={16} color="#718096" />
-             <Text style={styles.sectionTitle}>Sessão Anterior</Text>
-          </View>
-          <LastSessionList sets={lastSessionSets} />
+        {/* 1. PROGRESSÃO & STATUS */}
+        <View style={styles.cardsRow}>
+          <ProgressionCard data={data.last_progression} />
+          <StatusCard status={data.current_status} />
         </View>
 
-        {/* GRÁFICOS */}
+        {/* 2. RECAP SESSÃO ANTERIOR (RESTAURADO) */}
+        {data.last_session_sets && data.last_session_sets.length > 0 && (
+           <LastSessionRecap sets={data.last_session_sets} />
+        )}
+
+        {/* 3. ESTATÍSTICAS TÉCNICAS */}
+        <View style={styles.statsGrid}>
+          <InfoRow 
+            icon="clock" 
+            label="Duração Média" 
+            value={data.avg_duration_min > 0 ? `${data.avg_duration_min} min` : '--'} 
+          />
+          <InfoRow 
+            icon="watch" 
+            label="Descanso Médio" 
+            value={data.avg_rest_sec > 0 ? `${data.avg_rest_sec} seg` : '--'} 
+          />
+          {data.favorite_set_type && (
+            <InfoRow 
+              icon="layers" 
+              label="Tipo Favorito" 
+              value={data.favorite_set_type === 'normal' ? 'Séries Normais' : data.favorite_set_type.toUpperCase()} 
+            />
+          )}
+        </View>
+
+        {/* 4. GRÁFICO FORÇA (AZUL) */}
         <View style={styles.section}>
-          <View style={styles.chartHeader}>
-             <Text style={styles.sectionTitle}>Evolução</Text>
-             <View style={styles.chartToggle}>
-                <TouchableOpacity onPress={() => setChartMode('force')}><Text style={[styles.toggleText, chartMode === 'force' && styles.toggleActive]}>Força</Text></TouchableOpacity>
-                <View style={styles.verticalDivider} />
-                <TouchableOpacity onPress={() => setChartMode('volume')}><Text style={[styles.toggleText, chartMode === 'volume' && styles.toggleActive]}>Volume</Text></TouchableOpacity>
-             </View>
-          </View>
-          <View style={styles.chartWrapper}>
-            {chartMode === 'force' ? 
-              <ProChart data={analytics.chartDataE1RM} color="#007AFF" type="scatter" unit="kg" currentBest={currentBest} /> : 
-              <ProChart data={analytics.chartDataAccumulatedVolume} color="#805AD5" type="line" unit="kg" />
-            }
+          <Text style={styles.sectionTitle}>Força (e1RM)</Text>
+          <Text style={styles.sectionSub}>Estimativa de 1 Repetição Máxima.</Text>
+          <View style={styles.chartContainer}>
+             <SimpleLineChart data={data.chart_e1rm} color="#3182CE" yKey="avg" />
           </View>
         </View>
 
-        {/* HISTÓRICO DE RECORDES */}
-        <View style={styles.section}>
-          <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8}}>
-             <Feather name="award" size={16} color="#D69E2E" />
-             <Text style={styles.sectionTitle}>Recordes (PRs)</Text>
+        {/* 5. GRÁFICO VOLUME (ROXO - AGORA LIBERADO) */}
+        {data.chart_volume.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Volume de Carga</Text>
+            <Text style={styles.sectionSub}>Peso Total x Repetições (kg).</Text>
+            <View style={styles.chartContainer}>
+               <SimpleLineChart data={data.chart_volume} color="#805AD5" yKey="vol_load" />
+            </View>
           </View>
-          {analytics.historicalPRsList.length === 0 ? 
-            <Text style={styles.emptyText}>Ainda sem recordes registrados.</Text> : 
-            analytics.historicalPRsList.map((pr, i) => (
-              <View key={i} style={styles.prRow}>
-                <Text style={styles.prDate}>{moment(pr.date).format('DD/MM/YYYY')}</Text>
-                <View style={styles.prValues}>
-                   <Text style={styles.prMainValue}>{pr.weight}kg x {pr.reps}</Text>
-                   <Text style={styles.prSubValue}>e1RM: {pr.e1rm.toFixed(1)}kg</Text>
-                </View>
-              </View>
-            ))
-          }
-        </View>
-        <View style={{height: 40}} />
+        )}
+
+        <View style={{ height: 60 }} />
       </ScrollView>
     );
   };
 
   return (
-    <TrueSheet ref={sheetRef} sizes={['large']} cornerRadius={24} backgroundColor="#F7FAFC">
-      <View style={styles.sheetContainer}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-          <TouchableOpacity onPress={() => sheetRef.current?.dismiss()} style={styles.closeBtn}><Feather name="x" size={24} color="#A0AEC0" /></TouchableOpacity>
-        </View>
-        {renderContent()}
+    <TrueSheet ref={sheetRef} sizes={['large']} cornerRadius={24} backgroundColor="#FFF">
+      <View style={styles.header}>
+        <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+        <TouchableOpacity onPress={() => sheetRef.current?.dismiss()}>
+          <Feather name="x" size={24} color="#A0AEC0" />
+        </TouchableOpacity>
       </View>
+      {renderContent()}
     </TrueSheet>
   );
 });
 
 const styles = StyleSheet.create({
-  sheetContainer: { flex: 1, backgroundColor: '#F7FAFC' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#FFF' },
+  content: { padding: 20 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   headerTitle: { fontSize: 20, fontWeight: '800', color: '#1A202C', flex: 1 },
-  closeBtn: { padding: 4 },
-  contentContainer: { padding: 16 },
+  errorText: { textAlign: 'center', marginTop: 40, color: '#A0AEC0' },
   
-  // Charts
-  chartRow: { flexDirection: 'row', height: GRAPH_HEIGHT, alignItems: 'flex-end' },
-  yAxisContainer: { width: 35, height: '100%', borderRightWidth: 1, borderRightColor: '#F0F0F0', marginRight: 0 },
-  yAxisLabel: { fontSize: 10, color: '#A0AEC0', textAlign: 'right', paddingRight: 6, width: '100%' },
-  
-  pointLabelContainer: { position: 'absolute', width: 60, alignItems: 'center' },
-  pointLabel: { fontSize: 11, fontWeight: '600', color: '#4A5568' },
-  dateLabelContainer: { position: 'absolute', width: 50, alignItems: 'center' },
-  dateLabel: { fontSize: 10, color: '#A0AEC0', fontWeight: '500' },
+  cardsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
+  statusCard: { width: CARD_WIDTH, padding: 16, borderRadius: 16, borderWidth: 1, minHeight: 140, justifyContent: 'space-between' },
+  cardIconRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  cardTag: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  cardTitle: { fontSize: 16, fontWeight: '800', marginBottom: 4 },
+  cardDesc: { fontSize: 11, lineHeight: 16 },
 
-  chartWrapper: { width: '100%' },
-  chartPlaceholder: { height: 180, justifyContent: 'center', alignItems: 'center', width: '100%' },
-  placeholderText: { color: '#A0AEC0', marginTop: 8, fontSize: 13 },
-  
-  chartHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  chartToggle: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EDF2F7', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, gap: 12 },
-  verticalDivider: { width: 1, height: 12, backgroundColor: '#CBD5E0' },
-  toggleText: { fontSize: 12, fontWeight: '600', color: '#A0AEC0' },
-  toggleActive: { color: '#007AFF', fontWeight: '800' },
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginBottom: 32, backgroundColor: '#F9FAFB', padding: 16, borderRadius: 16 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', width: '45%', gap: 10 },
+  infoIconBox: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#EDF2F7', justifyContent: 'center', alignItems: 'center' },
+  infoLabel: { fontSize: 10, color: '#718096', fontWeight: '600', textTransform: 'uppercase' },
+  infoValue: { fontSize: 14, fontWeight: '800', color: '#2D3748' },
 
-  // Insight Cards
-  insightCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 16, borderWidth: 1, marginBottom: 20 },
-  insightGreen: { backgroundColor: '#F0FFF4', borderColor: '#C6F6D5' },
-  insightRed: { backgroundColor: '#FFF5F5', borderColor: '#FED7D7' },
-  insightBlue: { backgroundColor: '#EBF8FF', borderColor: '#BEE3F8' },
-  insightTitle: { fontSize: 14, fontWeight: '800', marginBottom: 2 },
-  insightText: { fontSize: 13, lineHeight: 18 },
-  section: { backgroundColor: '#FFF', borderRadius: 16, padding: 16, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 4, elevation: 1 },
+  lastSessionContainer: { marginBottom: 24, backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#EDF2F7', shadowColor: '#000', shadowOpacity: 0.02, shadowRadius: 4, elevation: 1 },
   sectionTitle: { fontSize: 12, fontWeight: '700', color: '#718096', textTransform: 'uppercase', letterSpacing: 0.5 },
-  lastSessionContainer: { gap: 0 },
-  lastSessionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F7FAFC' },
-  setIndexBadge: { backgroundColor: '#EDF2F7', width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  sectionSub: { fontSize: 12, color: '#A0AEC0', marginBottom: 16 },
+  setRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F7FAFC' },
+  setBadge: { backgroundColor: '#EDF2F7', width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   setIndexText: { fontSize: 11, fontWeight: '700', color: '#718096' },
-  setMainInfo: { flex: 1, flexDirection: 'row', alignItems: 'baseline', gap: 4 },
-  setWeight: { fontSize: 18, fontWeight: '800', color: '#2D3748' },
-  setReps: { fontSize: 18, fontWeight: '800', color: '#2D3748' },
-  setX: { fontSize: 14, color: '#CBD5E0', marginHorizontal: 4 },
-  unit: { fontSize: 12, fontWeight: '500', color: '#A0AEC0' },
+  setMainText: { fontSize: 16, fontWeight: '800', color: '#2D3748', flex: 1 },
   rpeBadge: { backgroundColor: '#F7FAFC', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#EDF2F7' },
   rpeText: { fontSize: 11, fontWeight: '700', color: '#718096' },
-  
-  // Tooltip
-  tooltipContainer: { position: 'absolute', top: -10, left: 0, right: 0, alignItems: 'center', zIndex: 99 },
-  tooltipBadge: { backgroundColor: '#FFF', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 2, alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, elevation: 4 },
-  tooltipDate: { fontSize: 10, color: '#718096', fontWeight: '700', marginBottom: 2 },
-  tooltipValue: { fontSize: 16, fontWeight: '900' },
-  
-  prRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F7FAFC' },
-  prDate: { fontSize: 13, color: '#718096', fontWeight: '500' },
-  prValues: { alignItems: 'flex-end' },
-  prMainValue: { fontSize: 15, fontWeight: '700', color: '#2D3748' },
-  prSubValue: { fontSize: 11, color: '#A0AEC0', fontWeight: '500' },
-  emptyContainer: { padding: 20, alignItems: 'center' },
-  emptyText: { color: '#A0AEC0', fontStyle: 'italic' },
+
+  section: { marginBottom: 32 },
+  chartContainer: { height: GRAPH_HEIGHT },
 });

@@ -4,16 +4,20 @@ import { Feather } from '@expo/vector-icons';
 import { WorkoutExercise, WorkoutSet } from '@/types/workout';
 import { ScaleDecorator } from 'react-native-draggable-flatlist';
 
-// IMPORTAÇÃO PADRÃO
 import SetRow from './SetRow';
 
 interface ExerciseCardProps {
   exercise: WorkoutExercise;
   activeTemplate: boolean;
   prSetIds: Set<string>;
-  editingSetId?: string | null; // <--- Está na interface
+  editingSetId?: string | null;
   isFetchingShareData: boolean;
   isHighlighted?: boolean;
+  
+  // [NOVO] Props para contexto de Programa e Substituição
+  isProgram?: boolean;
+  onSubstitute?: (exercise: WorkoutExercise) => void;
+
   onShowAnalytics: (definitionId: string, exerciseName: string) => void;
   onEditSet: (set: WorkoutSet) => void;
   onShareSet: (set: WorkoutSet, isPR: boolean, exerciseName: string, definitionId: string) => void;
@@ -29,9 +33,11 @@ const ExerciseCard = memo(
     exercise,
     activeTemplate,
     prSetIds,
-    editingSetId, // <--- 1. ADICIONADO AQUI
+    editingSetId,
     isFetchingShareData,
     isHighlighted,
+    isProgram,          // [NOVO]
+    onSubstitute,       // [NOVO]
     onShowAnalytics,
     onEditSet,
     onShareSet,
@@ -57,6 +63,30 @@ const ExerciseCard = memo(
       );
     };
 
+    // [NOVO] Verifica status de substituição
+    const isSubstituted = !!exercise.substituted_by_id;
+    const isSubstitution = !!exercise.is_substitution;
+
+    // [NOVO] Renderização Simplificada para Exercício Substituído (Antigo)
+    // Mostra apenas uma linha cinza indicando que ele estava lá, mas foi trocado.
+    if (isSubstituted) {
+      return (
+        <ScaleDecorator>
+          <View style={styles.containerWithConnector}>
+            <View style={styles.substitutedContainer}>
+              <View style={styles.substitutedContent}>
+                <Text style={styles.substitutedTitle}>{exercise.name}</Text>
+                <Text style={styles.substitutedLabel}>SUBSTITUÍDO</Text>
+              </View>
+              <Feather name="arrow-down-circle" size={20} color="#A0AEC0" />
+            </View>
+            {/* Linha conectora visual para o próximo card (o substituto) */}
+            <View style={styles.verticalConnector} />
+          </View>
+        </ScaleDecorator>
+      );
+    }
+
     return (
       <ScaleDecorator>
         <TouchableOpacity
@@ -68,15 +98,41 @@ const ExerciseCard = memo(
             styles.exerciseCard,
             isActive && styles.cardDragging,
             isHighlighted && styles.cardHighlighted,
+            // Se for um exercício substituto, damos um destaque na borda (Roxo)
+            isSubstitution && styles.substitutionCard
           ]}
         >
           {/* Header */}
-          <View style={styles.exerciseHeader}>
-            <Text style={[styles.exerciseName, isHighlighted && { color: '#007AFF' }]}>
-              {exercise.name}
-            </Text>
+          <View style={[styles.exerciseHeader, isSubstitution && styles.substitutionHeader]}>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.exerciseName, isHighlighted && { color: '#007AFF' }]}>
+                  {exercise.name}
+                </Text>
+                
+                {/* [NOVO] Badge de Substituto */}
+                {isSubstitution && (
+                  <View style={styles.subBadge}>
+                    <Feather name="shuffle" size={10} color="#FFF" />
+                    <Text style={styles.subBadgeText}>SUBSTITUTO</Text>
+                  </View>
+                )}
+              </View>
+            </View>
 
             <View style={styles.headerActions}>
+              
+              {/* [NOVO] Botão de Substituir */}
+              {/* Aparece apenas se: É Programa E NÃO é um exercício já substituído E NÃO é o substituto */}
+              {isProgram && onSubstitute && !isSubstitution && (
+                <TouchableOpacity
+                  style={styles.iconButton}
+                  onPress={() => onSubstitute(exercise)}
+                >
+                  <Feather name="refresh-cw" size={18} color="#805AD5" />
+                </TouchableOpacity>
+              )}
+
               <TouchableOpacity
                 style={styles.iconButton}
                 onPress={() => onShowAnalytics(exercise.definition_id, exercise.name)}
@@ -107,8 +163,7 @@ const ExerciseCard = memo(
                 exerciseId={exercise.id}
                 definitionId={exercise.definition_id}
                 exerciseName={exercise.name}
-                // CORREÇÃO ABAIXO: removido 'props.' e usado a variável direta
-                isEditing={editingSetId === set.id} 
+                isEditing={set.id === editingSetId}
                 isPR={prSetIds.has(set.id)}
                 isFetchingShareData={isFetchingShareData}
                 onEdit={onEditSet}
@@ -149,6 +204,15 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     backgroundColor: '#F0F9FF',
   },
+  
+  // Estilo específico para o card que entrou (Substituto)
+  substitutionCard: {
+    borderColor: '#D6BCFA',
+    borderLeftWidth: 3,
+    borderLeftColor: '#805AD5',
+    marginTop: -4, // Puxa um pouco para cima para colar visualmente no conector
+  },
+  
   exerciseHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -159,15 +223,20 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F0F0F0',
     backgroundColor: 'rgba(247, 250, 252, 0.5)',
   },
+  substitutionHeader: {
+    backgroundColor: '#FAF5FF',
+  },
+  
   exerciseName: {
     fontSize: 15,
     fontWeight: '800',
     color: '#2D3748',
-    flex: 1,
+    flexShrink: 1,
   },
   headerActions: {
     flexDirection: 'row',
-    gap: 4
+    gap: 4,
+    alignItems: 'center'
   },
   iconButton: {
     padding: 6,
@@ -181,6 +250,64 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     paddingVertical: 12,
+  },
+
+  // [NOVO] Estilos para Badge de Substituto
+  subBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#805AD5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    gap: 4
+  },
+  subBadgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '800',
+  },
+
+  // [NOVO] Container wrapper para o card substituído + conector
+  containerWithConnector: {
+    alignItems: 'center',
+    marginBottom: 0, // Sem margem inferior para colar no próximo
+  },
+  verticalConnector: {
+    width: 2,
+    height: 12,
+    backgroundColor: '#CBD5E0',
+    borderLeftWidth: 1,
+    borderStyle: 'dashed' 
+  },
+
+  // [NOVO] Estilos para Card Substituído (Antigo)
+  substitutedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F7FAFC',
+    width: '92%', // Mesma largura visual (margin 16 do card original)
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    opacity: 0.7,
+  },
+  substitutedContent: {
+    flex: 1,
+  },
+  substitutedTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#A0AEC0',
+    textDecorationLine: 'line-through',
+  },
+  substitutedLabel: {
+    fontSize: 10,
+    color: '#718096',
+    fontStyle: 'italic',
+    marginTop: 2,
   },
 });
 

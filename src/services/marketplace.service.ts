@@ -1,38 +1,35 @@
 import { supabase } from '@/lib/supabaseClient';
-import { Program } from '@/types/coaching';
+import { MarketplaceProduct, ProductType } from '@/types/marketplace';
 
-/**
- * Busca todos os programas disponíveis na vitrine.
- */
-export const fetchMarketplacePrograms = async (): Promise<Program[]> => {
-  const { data, error } = await supabase
-    .from('programs')
-    .select('*, coach:profiles!coach_id(display_name)') // Traz o nome do criador
-    .eq('is_template', true)
+export const fetchMarketplaceProducts = async (typeFilter?: ProductType[]): Promise<MarketplaceProduct[]> => {
+  let query = supabase
+    .from('marketplace_products')
+    .select('*')
+    .eq('is_active', true)
     .order('created_at', { ascending: false });
 
+  if (typeFilter && typeFilter.length > 0) {
+    query = query.in('product_type', typeFilter);
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
-  
-  // Mapeia para incluir o nome do autor se disponível
+
+  // Verifica o que o usuário já comprou para marcar "is_owned"
+  const { data: purchases } = await supabase.from('user_purchases').select('product_id').eq('user_id', (await supabase.auth.getUser()).data.user?.id);
+  const ownedIds = new Set(purchases?.map(p => p.product_id));
+
   return data.map((item: any) => ({
     ...item,
-    author_name: item.coach?.display_name || 'Escola de Força'
+    is_owned: ownedIds.has(item.id)
   }));
 };
 
-/**
- * Clona (compra) um programa para o usuário atual.
- */
-export const acquireProgram = async (templateId: string) => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Usuário não logado.');
-
-  // Chama a RPC poderosa que criamos
-  const { data, error } = await supabase.rpc('clone_program', {
-    p_template_id: templateId,
-    p_target_user_id: user.id
+export const purchaseProduct = async (productId: string) => {
+  const { data, error } = await supabase.rpc('purchase_marketplace_item', {
+    p_product_id: productId
   });
 
   if (error) throw error;
-  return data; // Retorna o ID do novo programa
+  return data;
 };

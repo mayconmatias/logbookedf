@@ -80,7 +80,6 @@ export default {
               "../../node_modules/@notifee/react-native/android/libs"
             ],
             // Aumenta compatibilidade do Kotlin para libs modernas
-            kotlinVersion: "1.9.24" 
           },
           ios: {
             useFrameworks: "static"

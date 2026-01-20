@@ -62,7 +62,7 @@ export default function CoachStudentsList({ navigation }: Props) {
   }, []);
 
   const handleOpenModal = () => {
-    setEmailInput(''); // Limpa o campo
+    setEmailInput('');
     setIsModalVisible(true);
   };
 
@@ -71,12 +71,20 @@ export default function CoachStudentsList({ navigation }: Props) {
     
     setInviting(true);
     try {
-      await inviteStudentByEmail(emailInput);
-      Alert.alert('Sucesso', 'Aluno adicionado!');
+      // Chama o serviço inteligente (vincula direto ou manda e-mail)
+      const result = await inviteStudentByEmail(emailInput);
+      
+      Alert.alert('Sucesso', result.message);
       setIsModalVisible(false);
-      loadData(); // Recarrega a lista
+      
+      // Se o aluno já existia e foi vinculado agora ('linked'), recarrega a lista.
+      // Se foi enviado convite ('invited'), não precisa recarregar pois ele ainda não aceitou.
+      if (result.status === 'linked') {
+        setLoading(true);
+        loadData(); 
+      }
     } catch (e: any) {
-      Alert.alert('Erro', e.message);
+      Alert.alert('Atenção', e.message);
     } finally {
       setInviting(false);
     }
@@ -94,10 +102,8 @@ export default function CoachStudentsList({ navigation }: Props) {
   }, [navigation]);
 
   const renderItem = ({ item }: { item: CoachingRelationship }) => {
-    // Recupera a data do último treino (vinda do service atualizado)
-    // Usamos 'as any' caso você ainda não tenha atualizado o tipo CoachingRelationship, 
-    // mas o dado já está vindo do backend.
-    const lastDate = (item as any).last_workout_date;
+    // @ts-ignore - last_workout_date vem do join no serviço
+    const lastDate = item.last_workout_date;
     const statusColor = getStatusColor(lastDate);
 
     return (
@@ -170,7 +176,7 @@ export default function CoachStudentsList({ navigation }: Props) {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Novo Aluno</Text>
             <Text style={styles.modalDescription}>
-              Digite o e-mail do aluno cadastrado no app:
+              Digite o e-mail do aluno. Se ele já tiver conta, será vinculado imediatamente. Se não, receberá um convite.
             </Text>
             
             <TextInput

@@ -1,51 +1,33 @@
-// src/types/analytics.ts
+export interface ExerciseAnalyticsDataV2 {
+  last_progression: {
+    date: string | null;
+    days_ago: number | null;
+  };
+  current_status: 'progressing' | 'stagnated' | 'regressing' | 'insufficient_data';
+  avg_duration_min: number;
+  avg_rest_sec: number;
+  favorite_set_type: string | null;
+  
+  chart_e1rm: {
+    date: string;
+    max: number;
+    avg: number;
+    min: number;
+  }[];
 
-export interface ChartDataPoint {
-  date: string;
-  value: number;
-}
+  chart_volume: {
+    date: string;
+    vol_load: number;
+    total_reps: number;
+    sets_count: number;
+  }[];
 
-export interface HistoricalSet {
-  date: string;
-  weight: number;
-  reps: number;
-  e1rm: number;
-}
-
-export interface CalendarDay {
-  date: string;
-  is_pr: boolean;
-}
-
-export interface ExerciseAnalyticsData {
-  prStreakCount: number;
-  daysSinceLastPR: number;
-  bestSetAllTime: HistoricalSet | null;
-  bestSetPreviousSession: HistoricalSet | null;
-  historicalPRsList: HistoricalSet[];
-  chartDataE1RM: ChartDataPoint[];
-  chartDataAccumulatedVolume: ChartDataPoint[];
-  calendarData: CalendarDay[];
-
-  // [CORREÇÃO] Adicionando os campos opcionais para o Growth Hack de validação
-  is_verified?: boolean;
-  tags?: string[];
-}
-
-export interface CurrentBestSet {
-  weight: number;
-  reps: number;
-  e1rm: number;
-  definitionId: string; 
-}
-
-// Tipo direto da tabela exercise_statistics
-export interface ExerciseStats {
-  definition_id: string;
-  max_weight: number;
-  max_e1rm: number;
-  total_sets: number;
-  // Mapa de peso -> reps máximas (ex: { "100": 5 })
-  max_reps_by_weight: Record<string, number>; 
-  last_performed: string | null;
+  // [NOVO]
+  last_session_sets: {
+    set_number: number;
+    weight: number;
+    reps: number;
+    rpe: number | null;
+    type: string;
+  }[] | null;
 }

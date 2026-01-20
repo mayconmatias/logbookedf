@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, View, StyleSheet } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Session } from "@supabase/supabase-js";
 import "react-native-url-polyfill/auto";
 
-// [CORREÇÃO 1] O RootView deve envolver TUDO
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import * as Linking from 'expo-linking';
@@ -45,6 +44,11 @@ import ProfileScreen from '@/screens/ProfileScreen';
 import ExerciseCatalogScreen from '@/screens/ExerciseCatalogScreen';
 import MyPrograms from '@/screens/MyPrograms';
 import MarketplaceScreen from '@/screens/MarketplaceScreen';
+import ProductDetailsScreen from '@/screens/ProductDetailsScreen'; 
+import NotificationsScreen from '@/screens/NotificationsScreen';
+
+// [CORREÇÃO] Import da tela wrapper do Modal
+import ExerciseFeedbackScreen from '@/screens/ExerciseFeedbackScreen'; 
 
 // Telas do Treinador
 import CoachStudentsList from '@/screens/coach/CoachStudentsList';
@@ -181,7 +185,6 @@ export default function App() {
   }
 
   return (
-    // [CORREÇÃO 2] GestureHandlerRootView aqui, como PAI da aplicação inteira
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
           <TimerProvider>
@@ -213,6 +216,21 @@ export default function App() {
                         <Stack.Screen name="MyPrograms" component={MyPrograms} options={{ title: 'Meus Programas' }} />
                         <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'Meu Perfil' }} />
                         <Stack.Screen name="Marketplace" component={MarketplaceScreen} options={{ title: 'Loja de Programas' }} />
+                        <Stack.Screen name="ProductDetails" component={ProductDetailsScreen} options={{ title: 'Detalhes' }} />
+                        <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notificações' }} />
+                        
+                        {/* [CORREÇÃO] Rota do Modal de Feedback Transparente */}
+                        <Stack.Screen 
+                          name="ExerciseFeedback" 
+                          component={ExerciseFeedbackScreen} 
+                          options={{ 
+                            presentation: 'transparentModal',
+                            headerShown: false,
+                            animation: 'fade',
+                            // remove o fundo branco padrão para garantir transparência
+                            contentStyle: { backgroundColor: 'transparent' }
+                          }} 
+                        />
                         
                         <Stack.Screen name="CoachPaywall" component={CoachPaywallScreen} options={{ title: 'Seja PRO', presentation: 'modal' }} />
                         <Stack.Screen name="CoachStudentsList" component={CoachStudentsList} options={{ title: 'Área do Treinador' }} />
@@ -234,7 +252,6 @@ export default function App() {
                 )}
               </NavigationContainer>
               
-              {/* Timer e Toaster precisam estar dentro do GestureHandlerRootView */}
               {session && !isPasswordRecovery && <RestTimer />}
               <Toaster />
             </BiometricGate>

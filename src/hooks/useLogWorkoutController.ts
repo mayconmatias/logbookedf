@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDebounce } from 'use-debounce';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner-native';
+import { CommonActions } from '@react-navigation/native';
 
 import { useWorkoutForm } from './useWorkoutForm';
 import { useWorkoutSession } from './useWorkoutSession';
@@ -13,218 +14,418 @@ import { useTimer } from '@/context/TimerContext';
 import { triggerHaptic } from '@/utils/haptics';
 
 import { 
-  getOrCreateExerciseInWorkout, saveSet, updateSet, deleteSet, deleteExercise
+  getOrCreateExerciseInWorkout, 
+  saveSet, 
+  updateSet, 
+  deleteSet, 
+  saveSuperSet, 
+  deleteExercise,
+  substituteExerciseInWorkout 
 } from '@/services/exercises.service';
 import { fetchAndGroupWorkoutData } from '@/services/workouts.service';
-import { classifyPR } from '@/services/records.service';
-import { LBS_TO_KG_FACTOR } from '@/utils/e1rm';
+import { supabase } from '@/lib/supabaseClient';
+import { sendMessage } from '@/services/feedback.service';
+
+import { LBS_TO_KG_FACTOR } from '@/utils/e1rm'; 
 import { WorkoutExercise, WorkoutSet } from '@/types/workout';
 
 const DRAFT_KEY = '@log_workout_draft_v3';
 
+const safeParse = (value: string): number => {
+  if (!value) return 0;
+  const clean = value.replace(',', '.').replace(/[^0-9.]/g, '');
+  return parseFloat(clean) || 0;
+};
+
+const safeInt = (value: string): number => {
+  if (!value) return 0;
+  const clean = value.replace(/[^0-9]/g, '');
+  const parsed = parseInt(clean, 10);
+  return isNaN(parsed) ? 0 : parsed;
+};
+
 export const useLogWorkoutController = (params: { workoutId?: string; templateId?: string }, navigation: any) => {
   const { t } = useTranslation();
-  const form = useWorkoutForm();
   
+  const form = useWorkoutForm();
   const session = useWorkoutSession(params.workoutId, params.templateId);
   const catalog = useExerciseCatalog();
-  const performance = usePerformancePeek();
+  
+  const perfA = usePerformancePeek();
+  const perfB = usePerformancePeek();
+  const perfC = usePerformancePeek();
+
   const timer = useTimer();
 
   const [saving, setSaving] = useState(false);
-  const [prSetIds, setPrSetIds] = useState<Set<string>>(new Set());
+  const [prSetIds, setPrSetIds] = useState<Set<string>>(new Set()); 
   const [isAutocompleteFocused, setIsAutocompleteFocused] = useState(false);
-
-  const [debouncedName] = useDebounce(form.values.exerciseName, 500);
+  
+  const hasAutoLoaded = useRef(false);
   const isFirstLoad = useRef(true);
 
-  // --- 1. Resolução de IDs de Exercício (Autocomplete) ---
+  const [debouncedNameA] = useDebounce(form.values.exerciseName, 500);
+
+  const refreshSessionData = useCallback(async () => {
+    if (!session.sessionWorkoutId) return;
+    const updated = await fetchAndGroupWorkoutData(session.sessionWorkoutId);
+    session.setGroupedWorkout(updated);
+    return updated; 
+  }, [session.sessionWorkoutId]);
+
+  const loadSetIntoForm = useCallback((
+    set: WorkoutSet, 
+    exercise?: WorkoutExercise,
+    options?: { preserveWeight?: string } 
+  ) => {
+      if (!exercise) {
+          exercise = session.groupedWorkout.find(e => e.id === set.exercise_id);
+      }
+      if (!exercise) return;
+
+      form.setters.setEditingSetId(set.id);
+      
+      form.setters.setExerciseName(exercise.name);
+      form.setters.setDefinitionIdA(exercise.definition_id);
+      perfA.fetchQuickStats(exercise.definition_id);
+
+      if (options?.preserveWeight) {
+         form.setters.setWeight(options.preserveWeight);
+      } else {
+         form.setters.setWeight(set.weight > 0 ? set.weight.toString() : '');
+      }
+
+      if (options?.preserveWeight && set.weight === 0 && set.reps === 0) {
+         form.setters.setReps(''); 
+      } else {
+         form.setters.setReps(set.reps > 0 ? set.reps.toString() : '');
+      }
+
+      form.setters.setRpe(set.rpe ? set.rpe.toString() : '');
+      
+      const obsWithE1RM = set.observations || '';
+      const pureObs = obsWithE1RM.replace(/\[e1RM:.*?\]/g, '').trim();
+      form.setters.setObservations(pureObs);
+
+      form.setters.setActiveSetType(set.set_type);
+      
+      const isUnilateral = exercise.is_unilateral || !!set.side;
+      form.setters.setIsUnilateral(isUnilateral);
+      form.setters.setSide(isUnilateral ? (set.side || 'D') : null);
+
+  }, [session.groupedWorkout, form.setters, perfA]);
+
   useEffect(() => {
-    if (!debouncedName) return;
-    const found = catalog.allExercises.find(
-      ex => ex.exercise_name_lowercase === debouncedName.toLowerCase().trim()
-    );
-    
+    if (!session.isProgram || session.loading || hasAutoLoaded.current || session.groupedWorkout.length === 0) return;
+
+    for (const ex of session.groupedWorkout) {
+       if (ex.substituted_by_id) continue;
+
+       const firstEmptySet = [...ex.sets]
+          .sort((a, b) => a.set_number - b.set_number)
+          .find(s => (s.weight || 0) === 0 && (s.reps || 0) === 0);
+       
+       if (firstEmptySet) {
+          loadSetIntoForm(firstEmptySet, ex);
+          hasAutoLoaded.current = true; 
+          return; 
+       }
+    }
+  }, [session.loading, session.groupedWorkout, loadSetIntoForm, session.isProgram]);
+
+  useEffect(() => {
+    if (!debouncedNameA) return;
+    const found = catalog.allExercises.find(ex => ex.exercise_name_lowercase === debouncedNameA.toLowerCase().trim());
     if (found) {
       if (form.values.definitionIdA !== found.exercise_id) {
         form.setters.setDefinitionIdA(found.exercise_id);
-        performance.fetchQuickStats(found.exercise_id);
+        perfA.fetchQuickStats(found.exercise_id);
       }
-    } else {
-      if (!form.values.editingSetId) {
-        form.setters.setDefinitionIdA(null);
-        performance.clearPeek();
-      }
+    } else if (!form.values.editingSetId && !form.values.isSubstitutionMode) {
+      form.setters.setDefinitionIdA(null);
+      perfA.clearPeek();
+      form.setters.setIsTemplateUnilateral(false);
     }
-  }, [debouncedName, catalog.allExercises]);
+  }, [debouncedNameA, catalog.allExercises, form.values.isSubstitutionMode]);
 
-  // --- 2. Draft Auto-Save ---
+  useEffect(() => {
+    if (!form.values.definitionIdA) {
+      form.setters.setIsTemplateUnilateral(false);
+      return;
+    }
+    const activeExerciseA = session.groupedWorkout.find(
+      (ex) => ex.definition_id === form.values.definitionIdA
+    );
+    const isUnilateralFromProgram = activeExerciseA?.is_unilateral || false;
+    form.setters.setIsTemplateUnilateral(isUnilateralFromProgram);
+  }, [form.values.definitionIdA, session.groupedWorkout, form.setters]);
+
   useEffect(() => {
     const saveDraft = async () => {
       if (!session.sessionWorkoutId) return;
-      const draftData = {
-        sessionId: session.sessionWorkoutId,
-        values: form.values,
-        timestamp: Date.now()
-      };
+      const draftData = { sessionId: session.sessionWorkoutId, values: form.values, timestamp: Date.now() };
       await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draftData));
     };
-    if (!session.loading && form.values.exerciseName) {
-      saveDraft();
-    }
+    if (!session.loading && form.values.exerciseName) saveDraft();
   }, [form.values, session.sessionWorkoutId]);
 
   useEffect(() => {
     const restoreDraft = async () => {
-      if (!isFirstLoad.current || !session.sessionWorkoutId) return;
+      if (!isFirstLoad.current || !session.sessionWorkoutId || hasAutoLoaded.current) return; 
       try {
         const draftJson = await AsyncStorage.getItem(DRAFT_KEY);
         if (draftJson) {
           const draft = JSON.parse(draftJson);
-          const isRecent = (Date.now() - draft.timestamp) < 24 * 60 * 60 * 1000;
-          
-          if (draft.sessionId === session.sessionWorkoutId && isRecent) {
+          if (draft.sessionId === session.sessionWorkoutId && (Date.now() - draft.timestamp) < 86400000) {
              form.setters.setExerciseName(draft.values.exerciseName || '');
              form.setters.setWeight(draft.values.weight || '');
              form.setters.setReps(draft.values.reps || '');
              form.setters.setRpe(draft.values.rpe || '');
              form.setters.setDefinitionIdA(draft.values.definitionIdA || null);
-             if(draft.values.definitionIdA) performance.fetchQuickStats(draft.values.definitionIdA);
+             if(draft.values.definitionIdA) perfA.fetchQuickStats(draft.values.definitionIdA);
           }
         }
-      } catch (e) { console.log('Erro draft', e); }
+      } catch (e) {}
       isFirstLoad.current = false;
     };
-    
-    if (session.sessionWorkoutId && !session.loading) {
-       restoreDraft();
-       
-       if (session.groupedWorkout.length > 0 && !form.values.exerciseName) {
-           const firstEx = session.groupedWorkout[0];
-           const firstSet = firstEx.sets.find(s => s.weight === 0 && s.reps === 0);
-           if (firstSet) {
-              prepareFormForNextSet(firstEx, firstSet);
-           }
-       }
-    }
+    if (session.sessionWorkoutId && !session.loading) restoreDraft();
   }, [session.sessionWorkoutId, session.loading]);
 
-  const prepareFormForNextSet = (exercise: WorkoutExercise, set: WorkoutSet) => {
-    form.setters.setExerciseName(exercise.name);
-    form.setters.setDefinitionIdA(exercise.definition_id);
-    form.setters.setWeight(''); 
-    form.setters.setReps(''); 
-    form.setters.setRpe(set.rpe ? set.rpe.toString() : '');
-    form.setters.setActiveSetType(set.set_type);
-    performance.fetchQuickStats(exercise.definition_id);
-  };
+  const handleFinish = useCallback(async () => {
+    Alert.alert(t('logWorkout.workoutFinishedTitle'), t('logWorkout.workoutFinishedBody'), [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('logWorkout.finishWorkoutButton'), onPress: async () => {
+            setSaving(true);
+            try { 
+                await session.finishWorkout(); 
+                await AsyncStorage.removeItem(DRAFT_KEY); 
+                navigation.dispatch(
+                  CommonActions.reset({
+                    index: 1,
+                    routes: [{ name: 'Home' }, { name: 'WorkoutHistory' }],
+                  })
+                );
+            } catch (error) { 
+                toast.error('Erro ao finalizar'); 
+            } finally { 
+                setSaving(false); 
+            }
+        }}
+    ]);
+  }, [navigation, session, t]);
 
-  // --- 3. Lógica de Salvar Série ---
   const handleSaveSet = useCallback(async () => {
-    if (!form.values.exerciseName || !form.values.weight || !form.values.reps) {
+    if (!form.values.exerciseName?.trim() || form.values.weight === '' || form.values.reps === '') {
       toast(t('logWorkout.formValidation')); 
       return;
     }
-    let savedSetId: string | null = null; // Variável para capturar ID da nova série
+
     setSaving(true);
     Keyboard.dismiss();
 
+    const weightToCarryOver = form.values.weight;
+    const currentDefinitionId = form.values.definitionIdA;
+
     try {
-      const wA = parseFloat(form.values.weight.replace(',', '.'));
-      const wKg = form.values.inputUnit === 'lbs' ? wA * LBS_TO_KG_FACTOR : wA;
+      const isSuper = ['biset', 'triset'].includes(form.values.activeSetType);
       
-      const rpeValue = form.values.rpe 
-        ? parseFloat(form.values.rpe.replace(',', '.')) 
-        : undefined;
-
-      const ensureDef = async (name: string, currentId: string | null) => {
-        if (currentId) return currentId;
-        const newDef = await catalog.handleCreateExercise(name, { silent: true });
-        return newDef?.exercise_id || null;
-      };
-
-      const defIdA = await ensureDef(form.values.exerciseName, form.values.definitionIdA);
-      if (!defIdA) throw new Error('Erro ao identificar exercício.');
-
-      const exInstanceId = await getOrCreateExerciseInWorkout(session.sessionWorkoutId!, defIdA);
-
-      const commonData = {
-        weight: wKg,
-        reps: parseInt(form.values.reps),
-        rpe: rpeValue,
-        observations: form.values.observations || undefined,
-        side: form.values.isUnilateral ? form.values.side : undefined,
-        set_type: form.values.activeSetType,
-        // Incluindo subsets
-        subSets: form.values.subSets.map(s => ({
-          weight: parseFloat(s.weight), reps: parseInt(s.reps)
-        }))
-      };
-
-      // LOGICA DE AQUECIMENTO E EDIÇÃO
-      let targetEditingId = form.values.editingSetId;
-      const isWarmup = form.values.activeSetType === 'warmup';
-
-      if (targetEditingId) {
-        const originalSet = session.groupedWorkout
-            .flatMap(ex => ex.sets)
-            .find(s => s.id === targetEditingId);
-
-        if (isWarmup) {
-            if (originalSet && originalSet.set_type !== 'warmup') {
-                targetEditingId = null;
-            }
+      const getExInstance = async (name: string, currentDefId: string | null) => {
+        let defId = currentDefId;
+        if (!defId) {
+           const newDef = await catalog.handleCreateExercise(name, { silent: true });
+           if (!newDef) throw new Error(`Falha ao criar: ${name}`);
+           defId = newDef.exercise_id;
         }
-      }
+        const instanceId = await getOrCreateExerciseInWorkout(session.sessionWorkoutId!, defId);
+        return { defId, instanceId };
+      };
 
-      if (targetEditingId) {
-        // EDIÇÃO
-        await updateSet(targetEditingId, commonData as any);
-        savedSetId = targetEditingId; // <--- CAPTURA ID
-        toast.success('Série atualizada');
-        form.setters.setEditingSetId(null);
-        form.actions.clearForm();
+      const convertW = (val: string) => form.values.inputUnit === 'lbs' ? safeParse(val) * LBS_TO_KG_FACTOR : safeParse(val);
+
+      if (isSuper) {
+          const exA = await getExInstance(form.values.exerciseName, form.values.definitionIdA);
+          const exB = await getExInstance(form.values.exerciseNameB, form.values.definitionIdB);
+          let exC = null;
+          if (form.values.activeSetType === 'triset') exC = await getExInstance(form.values.exerciseNameC, form.values.definitionIdC);
+          
+          const itemsToSave = [
+            { exercise_id: exA.instanceId, weight: convertW(form.values.weight), reps: safeInt(form.values.reps), side: form.values.isUnilateral ? form.values.side : null },
+            { exercise_id: exB.instanceId, weight: convertW(form.values.weightB), reps: safeInt(form.values.repsB), side: form.values.isUnilateralB ? form.values.sideB : null }
+          ];
+          if (exC) itemsToSave.push({ exercise_id: exC.instanceId, weight: convertW(form.values.weightC), reps: safeInt(form.values.repsC), side: form.values.isUnilateralC ? form.values.sideC : null });
+
+          await saveSuperSet(itemsToSave, form.values.activeSetType);
+          toast.success('Série combinada salva!');
+          triggerHaptic('success');
 
       } else {
-        // NOVA/PLANO
-        const currentExerciseData = session.groupedWorkout.find(e => e.id === exInstanceId);
+        const { instanceId } = await getExInstance(form.values.exerciseName, form.values.definitionIdA);
         
-        const pendingSet = !isWarmup 
-            ? currentExerciseData?.sets.find(s => s.weight === 0 && s.reps === 0)
-            : null;
+        const wKg = convertW(form.values.weight);
+        const rVal = safeInt(form.values.reps);
+        
+        const userObs = form.values.observations ? form.values.observations.trim() : '';
+        const autoTag = form.values.e1rmDisplayTag ? `[e1RM: ${form.values.e1rmDisplayTag}]` : '';
+        const finalObsToSave = userObs ? (autoTag ? `${userObs} ${autoTag}` : userObs) : autoTag;
 
-        if (pendingSet) {
-           const updated = await updateSet(pendingSet.id, {
-             ...commonData,
-             performed_at: new Date().toISOString()
-           } as any);
-           savedSetId = updated.id; // <--- CAPTURA ID
-        } else {
-           const nextNum = currentExerciseData ? currentExerciseData.sets.length + 1 : 1;
-           const created = await saveSet({
-             exercise_id: exInstanceId,
-             set_number: isWarmup ? 0 : nextNum,
-             ...commonData
-           });
-           savedSetId = created.id; // <--- CAPTURA ID
+        let finalRpe = form.values.rpe ? safeParse(form.values.rpe) : undefined;
+        if (finalRpe === undefined && form.values.activeSetType === 'normal') {
+            finalRpe = 10; 
         }
 
-        if (!isWarmup && savedSetId) {
-           const pr = classifyPR(wKg, parseInt(form.values.reps), performance.exerciseStats);
-           if (pr.isPR) {
-              triggerHaptic('success');
-              toast.success(`NOVO RECORDE: ${pr.diffLabel}`);
-              setPrSetIds(prev => new Set(prev).add(savedSetId!)); // <--- USA O ID CAPTURADO
+        const commonData = {
+          weight: wKg, 
+          reps: rVal, 
+          rpe: finalRpe, 
+          observations: finalObsToSave || undefined, 
+          side: form.values.isUnilateral ? form.values.side : undefined,
+          set_type: form.values.activeSetType,
+          subSets: form.values.subSets.map(s => ({ weight: safeParse(s.weight), reps: safeInt(s.reps) }))
+        };
+
+        let targetSetId = form.values.editingSetId;
+        
+        // [CORREÇÃO] Lógica para preservar séries prescritas se for Aquecimento
+        if (form.values.activeSetType === 'warmup') {
+            // Se estamos editando uma série, precisamos checar se ela JÁ ERA warmup
+            if (targetSetId) {
+                // Buscamos a série no estado local
+                const currentExerciseData = session.groupedWorkout.find(e => e.id === instanceId);
+                const setToEdit = currentExerciseData?.sets.find(s => s.id === targetSetId);
+                
+                // Se a série que estamos clicando NÃO era warmup, não devemos sobrescrevê-la.
+                // Criamos uma nova série de aquecimento e deixamos a prescrita (Normal) intacta.
+                if (setToEdit && setToEdit.set_type !== 'warmup') {
+                    targetSetId = null; // Força criação de nova série
+                }
+            }
+        } 
+        
+        // Se não for warmup (ou se targetSetId foi mantido), tenta encontrar o próximo slot vazio
+        if (!targetSetId && session.isProgram && form.values.activeSetType !== 'warmup') { 
+            const currentExerciseData = session.groupedWorkout.find(e => e.id === instanceId);
+            const sets = currentExerciseData?.sets || [];
+            // Encontra o primeiro slot normal vazio
+            const nextEmptySet = [...sets]
+                .sort((a, b) => (a.set_number - b.set_number))
+                .find(s => (s.weight || 0) === 0 && (s.reps || 0) === 0 && s.set_type !== 'warmup');
+            if (nextEmptySet) targetSetId = nextEmptySet.id;
+        }
+
+        if (targetSetId) {
+           await updateSet(targetSetId, commonData as any);
+           if (form.values.editingSetId) {
+               toast.success('Série atualizada');
+               form.setters.setEditingSetId(null); 
+           } else {
+               triggerHaptic('success'); 
+           }
+        } else {
+           const currentExerciseData = session.groupedWorkout.find(e => e.id === instanceId);
+           const nextNum = currentExerciseData ? currentExerciseData.sets.length + 1 : 1;
+           const saved = await saveSet({ exercise_id: instanceId, set_number: nextNum, ...commonData });
+           if (form.values.activeSetType !== 'warmup' && saved?.id) {
+               triggerHaptic('success'); toast.success('Série registrada');
+           }
+        }
+
+        if (userObs && !form.values.isSubstitutionMode && form.values.definitionIdA) {
+           const { data: userData } = await supabase.auth.getUser();
+           if (userData.user) {
+              sendMessage(
+                form.values.definitionIdA,
+                userData.user.id,
+                userData.user.id, 
+                userObs,
+                'aluno'
+              ).catch(err => console.log('Erro silencioso ao enviar chat:', err));
            }
         }
       }
 
-      const updatedWorkout = await fetchAndGroupWorkoutData(session.sessionWorkoutId!);
-      session.setGroupedWorkout(updatedWorkout);
+      await refreshSessionData();
       await AsyncStorage.removeItem(DRAFT_KEY);
+      
+      form.actions.resetForNextSet();
 
-      if (!targetEditingId) {
-         handleAutoAdvance(updatedWorkout, exInstanceId);
+      // [LÓGICA DE AVANÇO] (Mantida igual, apenas garantindo que Aquecimento não avança o cursor)
+      if (session.isProgram && !isSuper && currentDefinitionId && form.values.activeSetType !== 'warmup') { 
+          const updatedWorkout = await fetchAndGroupWorkoutData(session.sessionWorkoutId!);
+          const currentExIndex = updatedWorkout.findIndex(e => e.definition_id === currentDefinitionId);
+          const exerciseInData = updatedWorkout[currentExIndex];
+
+          if (exerciseInData) {
+             const nextEmptySet = [...exerciseInData.sets]
+                .sort((a, b) => a.set_number - b.set_number)
+                .find(s => (s.weight || 0) === 0 && (s.reps || 0) === 0);
+
+             if (nextEmptySet) {
+                 loadSetIntoForm(nextEmptySet, exerciseInData, { preserveWeight: weightToCarryOver });
+             } else {
+                 let nextExIndex = currentExIndex + 1;
+                 let nextExercise = updatedWorkout[nextExIndex];
+                 
+                 while (nextExercise && nextExercise.substituted_by_id) {
+                    nextExIndex++;
+                    nextExercise = updatedWorkout[nextExIndex];
+                 }
+
+                 if (nextExercise) {
+                     Alert.alert(
+                         'Exercício Finalizado',
+                         'Todas as séries prescritas foram realizadas.',
+                         [
+                             {
+                                 text: 'Adicionar Série',
+                                 onPress: () => {
+                                     form.setters.setExerciseName(exerciseInData.name);
+                                     form.setters.setDefinitionIdA(exerciseInData.definition_id);
+                                     form.setters.setWeight(weightToCarryOver);
+                                     if (exerciseInData.is_unilateral) form.setters.setIsUnilateral(true);
+                                 }
+                             },
+                             {
+                                 text: 'Próximo Exercício',
+                                 style: 'default',
+                                 onPress: () => {
+                                     const nextExFirstSet = [...nextExercise.sets]
+                                        .sort((a, b) => a.set_number - b.set_number)
+                                        .find(s => (s.weight || 0) === 0 && (s.reps || 0) === 0);
+                                     
+                                     if (nextExFirstSet) {
+                                         loadSetIntoForm(nextExFirstSet, nextExercise);
+                                     } else {
+                                         form.setters.setExerciseName(nextExercise.name);
+                                         form.setters.setDefinitionIdA(nextExercise.definition_id);
+                                         perfA.fetchQuickStats(nextExercise.definition_id);
+                                     }
+                                 }
+                             }
+                         ]
+                     );
+                 } else {
+                     Alert.alert(
+                         'Treino Finalizado!',
+                         'Você completou todos os exercícios.',
+                         [
+                             {
+                                 text: 'Adicionar Série Extra',
+                                 onPress: () => {
+                                     form.setters.setExerciseName(exerciseInData.name);
+                                     form.setters.setDefinitionIdA(exerciseInData.definition_id);
+                                     form.setters.setWeight(weightToCarryOver);
+                                 }
+                             },
+                             {
+                                 text: 'Finalizar',
+                                 style: 'default',
+                                 onPress: handleFinish
+                             }
+                         ]
+                     );
+                 }
+             }
+          }
       }
 
     } catch (e: any) {
@@ -232,138 +433,204 @@ export const useLogWorkoutController = (params: { workoutId?: string; templateId
     } finally {
       setSaving(false);
     }
-}, [form.values, session.sessionWorkoutId, performance.exerciseStats]);
+  }, [form.values, session.sessionWorkoutId, perfA.exerciseStats, session.groupedWorkout, loadSetIntoForm, form.actions, handleFinish, session.isProgram]);
 
-  // --- Lógica de Avanço (CORRIGIDA) ---
-  const handleAutoAdvance = (workoutData: WorkoutExercise[], currentExInstanceId: string) => {
-     // [CORREÇÃO] Se for treino LIVRE, não faz nada além de confirmar
-     if (!session.isProgram) {
-        return; 
-     }
+  const handleInitiateSubstitution = useCallback((exercise: WorkoutExercise) => {
+    form.actions.clearForm();
+    form.setters.setIsSubstitutionMode(true);
+    form.setters.setSubstitutionOriginalName(exercise.name);
+    form.setters.setSubstitutionOriginalId(exercise.id);
+    toast(`Selecione o exercício para substituir ${exercise.name}`);
+  }, [form.actions, form.setters]);
 
-     const currentExIndex = workoutData.findIndex(e => e.id === currentExInstanceId);
-     const currentEx = workoutData[currentExIndex];
-     
-     if (!currentEx) return;
+  const handleConfirmSubstitution = useCallback(async () => {
+    if (!form.values.substitutionOriginalId || !form.values.definitionIdA || !session.sessionWorkoutId) {
+      toast.error('Selecione um exercício válido para substituir.');
+      return;
+    }
 
-     const nextPendingSet = currentEx.sets.find(s => s.weight === 0 && s.reps === 0);
+    setSaving(true);
+    try {
+      let finalDefId = form.values.definitionIdA;
+      if (!finalDefId) {
+         const newDef = await catalog.handleCreateExercise(form.values.exerciseName, { silent: true });
+         if (!newDef) throw new Error("Erro ao criar exercício.");
+         finalDefId = newDef.exercise_id;
+      }
 
-     if (nextPendingSet) {
-        form.setters.setWeight(''); 
-        form.setters.setReps('');
-        form.setters.setRpe('');
-        toast(`Próxima série: #${nextPendingSet.set_number}`);
-     } else {
-        const nextExercise = workoutData[currentExIndex + 1];
+      const newExerciseId = await substituteExerciseInWorkout(
+        session.sessionWorkoutId,
+        form.values.substitutionOriginalId,
+        finalDefId
+      );
 
-        if (nextExercise) {
-           Alert.alert(
-             'Exercício Finalizado',
-             `Deseja ir para o próximo: "${nextExercise.name}"?`,
-             [
-               { text: 'Não, fazer mais uma', style: 'cancel', onPress: () => {} },
-               { text: 'Sim, Avançar', onPress: () => {
-                  form.setters.setExerciseName(nextExercise.name);
-                  form.setters.setDefinitionIdA(nextExercise.definition_id);
-                  form.actions.clearForm();
-                  performance.fetchQuickStats(nextExercise.definition_id);
-                  
-                  const nextFirstSet = nextExercise.sets.find(s => s.weight === 0);
-                  if (nextFirstSet) {
-                    form.setters.setActiveSetType('normal'); 
-                  }
-               }}
-             ]
-           );
-        } else {
-           Alert.alert(
-             'Treino Concluído!',
-             'Todas as séries planejadas foram realizadas.',
-             [
-                { text: 'Adicionar Extra', style: 'cancel' },
-                { text: 'Finalizar Treino', onPress: handleFinish }
-             ]
-           );
-        }
-     }
-  };
+      const hasDataToLog = form.values.weight && form.values.reps;
+      
+      if (hasDataToLog) {
+         const { data: newSets } = await supabase
+            .from('sets')
+            .select('id, set_number')
+            .eq('exercise_id', newExerciseId)
+            .order('set_number', { ascending: true });
+
+         const targetSet = newSets?.find(s => s.set_number === 1);
+
+         const wKg = form.values.inputUnit === 'lbs' ? safeParse(form.values.weight) * LBS_TO_KG_FACTOR : safeParse(form.values.weight);
+         const rVal = safeInt(form.values.reps);
+         let finalRpe = form.values.rpe ? safeParse(form.values.rpe) : undefined;
+         if (finalRpe === undefined) finalRpe = 10;
+
+         const userObs = form.values.observations ? form.values.observations.trim() : '';
+         const autoTag = form.values.e1rmDisplayTag ? `[e1RM: ${form.values.e1rmDisplayTag}]` : '';
+         const finalObs = userObs ? (autoTag ? `${userObs} ${autoTag}` : userObs) : autoTag;
+
+         const setData = {
+            weight: wKg,
+            reps: rVal,
+            rpe: finalRpe,
+            observations: finalObs || undefined,
+            side: form.values.isUnilateral ? (form.values.side || 'D') : undefined
+         };
+
+         if (targetSet) {
+            await updateSet(targetSet.id, setData);
+         } else {
+            await saveSet({
+                exercise_id: newExerciseId,
+                set_number: 1,
+                ...setData,
+                set_type: 'normal'
+            });
+         }
+         
+         toast.success('Exercício substituído e série registrada!');
+         triggerHaptic('success');
+      } else {
+         toast.success('Exercício substituído!');
+         triggerHaptic('success');
+      }
+      
+      const updatedData = await refreshSessionData(); 
+      form.actions.resetForNextSet(); 
+
+      const newExerciseInstance = updatedData?.find(e => e.id === newExerciseId);
+
+      if (newExerciseInstance) {
+          form.setters.setExerciseName(newExerciseInstance.name);
+          form.setters.setDefinitionIdA(newExerciseInstance.definition_id);
+          perfA.fetchQuickStats(newExerciseInstance.definition_id);
+
+          const nextEmptySet = newExerciseInstance.sets
+             .sort((a, b) => a.set_number - b.set_number)
+             .find(s => (s.weight || 0) === 0 && (s.reps || 0) === 0);
+
+          if (nextEmptySet) {
+             loadSetIntoForm(nextEmptySet, newExerciseInstance, { preserveWeight: form.values.weight });
+          } else {
+             form.setters.setEditingSetId(null);
+          }
+      } else {
+          form.actions.clearForm();
+      }
+
+    } catch (e: any) {
+      toast.error(e.message || 'Erro ao substituir.');
+    } finally {
+      setSaving(false);
+    }
+  }, [form.values, session.sessionWorkoutId, refreshSessionData, form.actions, catalog, loadSetIntoForm]);
 
   const handleEditSet = useCallback((set: WorkoutSet) => {
     requestAnimationFrame(() => {
-        form.setters.setEditingSetId(set.id);
-        
-        const parentExercise = session.groupedWorkout.find(e => e.id === set.exercise_id);
-        if (parentExercise) {
-           form.setters.setExerciseName(parentExercise.name);
-           form.setters.setDefinitionIdA(parentExercise.definition_id);
-           performance.fetchQuickStats(parentExercise.definition_id);
-        }
-
-        form.setters.setWeight(set.weight.toString());
-        form.setters.setReps(set.reps.toString());
-        form.setters.setRpe(set.rpe ? set.rpe.toString() : '');
-        form.setters.setObservations(set.observations || '');
-        form.setters.setActiveSetType(set.set_type);
-        
-        if (set.side) {
-            form.setters.setIsUnilateral(true);
-            form.setters.setSide(set.side);
-        } else {
-            form.setters.setIsUnilateral(false);
-            form.setters.setSide(null);
-        }
-        
+        loadSetIntoForm(set);
         toast('Editando série...');
     });
-  }, [session.groupedWorkout, form.setters, performance]);
+  }, [loadSetIntoForm]);
 
-  const handleDeleteSet = async (setId: string, exId: string, defId: string) => {
-     Alert.alert('Apagar', 'Remover esta série?', [
-       { text: 'Cancelar', style: 'cancel'},
-       { text: 'Apagar', style: 'destructive', onPress: async () => {
-          await deleteSet(setId);
-          const updated = await fetchAndGroupWorkoutData(session.sessionWorkoutId!);
-          session.setGroupedWorkout(updated);
-       }}
-     ]);
-  };
+  const handleDeleteSet = async (setId: string, _exId: string, _defId: string) => {
+    let targetSet: WorkoutSet | undefined;
+    for (const ex of session.groupedWorkout) {
+      const found = ex.sets.find(s => s.id === setId);
+      if (found) { targetSet = found; break; }
+    }
 
-  const handleClearExerciseName = useCallback(() => {
-    form.setters.setExerciseName('');
-    form.setters.setDefinitionIdA(null);
-    form.actions.clearForm(); 
-    performance.clearPeek();
-    setIsAutocompleteFocused(false);
-  }, [form.setters, form.actions, performance]);
+    if (!targetSet) return;
 
-  const handleFinish = async () => {
-    Alert.alert(
-      t('logWorkout.workoutFinishedTitle'),
-      t('logWorkout.workoutFinishedBody'),
-      [
-        { text: t('common.cancel'), style: 'cancel' },
-        { 
-          text: t('logWorkout.finishWorkoutButton'), 
-          onPress: async () => {
-            setSaving(true);
-            try {
-              await session.finishWorkout(); 
-              await AsyncStorage.removeItem(DRAFT_KEY);
-              navigation.reset({ index: 0, routes: [{ name: 'WorkoutHistory' }] });
-            } catch (error) {
-              toast.error('Erro ao finalizar');
-            } finally {
-              setSaving(false);
+    const isWarmup = targetSet.set_type === 'warmup';
+    
+    if (!session.isProgram || isWarmup) {
+        Alert.alert(
+          'Remover Série', 
+          'Deseja apagar esta série?', 
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { 
+              text: 'Apagar', 
+              style: 'destructive', 
+              onPress: async () => {
+                try {
+                  await deleteSet(setId);
+                  toast.success('Série removida');
+                  refreshSessionData();
+                } catch(e) { toast.error('Erro ao deletar'); }
+              }
             }
-          }
-        }
-      ]
-    );
+          ]
+        );
+    } else {
+        Alert.alert(
+          'Limpar Série', 
+          'Deseja limpar os dados desta série?', 
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { 
+              text: 'Limpar', 
+              style: 'default', 
+              onPress: async () => {
+                try {
+                  await updateSet(setId, { weight: 0, reps: 0, rpe: null, observations: null });
+                  toast.success('Série reiniciada');
+                  refreshSessionData();
+                } catch(e) { toast.error('Erro ao limpar'); }
+              }
+            }
+          ]
+        );
+    }
   };
-  
+
+  const handleDeleteExercise = async (exerciseInstanceId: string) => {
+    if (session.isProgram) {
+        Alert.alert(
+          'Atenção', 
+          'Em treinos programados, você não pode remover o exercício da lista. Você pode pular, deixar em branco ou substituir.'
+        );
+        return;
+    }
+
+    try {
+        await deleteExercise(exerciseInstanceId);
+        toast.success('Exercício removido');
+        refreshSessionData();
+        form.actions.fullReset();
+    } catch(e) {
+        toast.error('Erro ao remover exercício');
+    }
+  };
+
+  const handleClearExerciseName = useCallback((field: 'A' | 'B' | 'C' = 'A') => { 
+      if (field === 'A') {
+        form.setters.setExerciseName(''); form.setters.setDefinitionIdA(null);
+      } else if (field === 'B') {
+        form.setters.setExerciseNameB(''); form.setters.setDefinitionIdB(null);
+      } else {
+        form.setters.setExerciseNameC(''); form.setters.setDefinitionIdC(null);
+      }
+  }, [form.setters]);
+
   return {
-    form, session, catalog, performance,
-    saving, prSetIds, isAutocompleteFocused, setIsAutocompleteFocused,
-    handleSaveSet, handleEditSet, handleDeleteSet, handleFinish, handleClearExerciseName, timer
+    form, session, catalog, perfA, perfB, perfC, saving, prSetIds, isAutocompleteFocused, setIsAutocompleteFocused,
+    handleSaveSet, handleEditSet, handleDeleteSet, handleDeleteExercise, handleFinish, handleClearExerciseName, timer,
+    handleInitiateSubstitution, handleConfirmSubstitution
   };
 };

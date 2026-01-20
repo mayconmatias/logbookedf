@@ -19,7 +19,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
 import { RootStackParamList } from '@/types/navigation';
 import { PlannedExercise } from '@/types/coaching';
-import { CatalogExerciseItem } from '@/types/catalog';
+import { SetType } from '@/types/workout';
 import { 
   fetchPlannedExercises, 
   addPlannedExercise, 
@@ -34,6 +34,9 @@ import DraggableFlatList, {
 } from 'react-native-draggable-flatlist';
 import { supabase } from '@/lib/supabaseClient'; 
 
+// Import do Modal Unificado
+import { ExerciseFeedbackModal } from '@/components/ExerciseFeedbackModal';
+
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -41,13 +44,22 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 type Props = NativeStackScreenProps<RootStackParamList, 'CoachWorkoutEditor'>;
 
 export default function CoachWorkoutEditor({ navigation, route }: Props) {
-  const { workout } = route.params;
+  const { workout, studentId: paramStudentId } = route.params;
+  
+  const [resolvedStudentId, setResolvedStudentId] = useState<string | undefined>(paramStudentId);
+
   const [exercises, setExercises] = useState<PlannedExercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [isReordering, setIsReordering] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null); 
 
   const [isPickerVisible, setIsPickerVisible] = useState(false);
+  
+  // Estados para o Modal de Feedback
+  const [feedbackModalVisible, setFeedbackModalVisible] = useState(false);
+  const [activeFeedbackDefId, setActiveFeedbackDefId] = useState<string | null>(null);
+  const [activeFeedbackName, setActiveFeedbackName] = useState('');
+
   const { 
     searchTerm, 
     setSearchTerm, 
@@ -56,21 +68,46 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
     allExercises 
   } = useExerciseCatalog();
 
+  // Estados do Formulário Inline
   const [formSets, setFormSets] = useState('');
   const [formReps, setFormReps] = useState('');
   const [formRpe, setFormRpe] = useState('');
   const [formNotes, setFormNotes] = useState('');
+  const [formSetType, setFormSetType] = useState<SetType>('normal');
+  
   const [saving, setSaving] = useState(false);
   const [creatingNew, setCreatingNew] = useState(false);
 
+  // IA
   const [isAiModalVisible, setIsAiModalVisible] = useState(false);
   const [aiText, setAiText] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+
+  const ensureStudentId = async () => {
+    if (resolvedStudentId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('planned_workouts')
+        .select('program:programs(student_id)')
+        .eq('id', workout.id)
+        .single();
+
+      if (!error && data?.program) {
+        // @ts-ignore
+        const sId = data.program.student_id;
+        if (sId) setResolvedStudentId(sId);
+      }
+    } catch (e) {
+      console.log('Erro ao resolver studentId', e);
+    }
+  };
 
   const loadData = async () => {
     try {
       const data = await fetchPlannedExercises(workout.id);
       setExercises(data);
+      await ensureStudentId();
     } catch (e: any) {
       Alert.alert('Erro', e.message);
     } finally {
@@ -95,8 +132,22 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
         setFormReps(item.reps_range || '');
         setFormRpe(item.rpe_target || '');
         setFormNotes(item.notes || '');
+        setFormSetType(item.set_type || 'normal');
       }
     }
+  };
+
+  const handleOpenFeedback = (definitionId: string, name: string) => {
+    if (!resolvedStudentId) {
+      Alert.alert('Aguarde', 'Identificando aluno vinculado...');
+      ensureStudentId().then(() => {
+         Alert.alert('Tente novamente', 'Vínculo restaurado.');
+      });
+      return;
+    }
+    setActiveFeedbackDefId(definitionId);
+    setActiveFeedbackName(name);
+    setFeedbackModalVisible(true);
   };
 
   const handleAdd = async (definitionId: string) => {
@@ -112,22 +163,21 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
     }
   };
 
+  // [FUNCIONALIDADE REATIVADA]
   const handleCreateAndAdd = async () => {
     if (!searchTerm || searchTerm.trim().length < 3) {
       Alert.alert('Atenção', 'O nome do exercício deve ter pelo menos 3 letras.');
       return;
     }
-
     setCreatingNew(true);
     try {
       const newExercise = await handleCreateExercise(searchTerm, { silent: true });
-      
       if (newExercise) {
         await addPlannedExercise(workout.id, newExercise.exercise_id, exercises.length);
         setSearchTerm('');
         setIsPickerVisible(false);
         await loadData();
-        Alert.alert('Sucesso', `"${newExercise.exercise_name_capitalized}" adicionado ao treino.`);
+        Alert.alert('Sucesso', `"${newExercise.exercise_name_capitalized}" adicionado.`);
       }
     } catch (e: any) {
       console.log(e);
@@ -143,16 +193,17 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
         sets_count: parseInt(formSets) || 0,
         reps_range: formReps,
         rpe_target: formRpe,
-        notes: formNotes
+        notes: formNotes,
+        set_type: formSetType
       });
       setExercises(prev => prev.map(ex => ex.id === id ? {
         ...ex,
         sets_count: parseInt(formSets) || 0,
         reps_range: formReps,
         rpe_target: formRpe,
-        notes: formNotes
+        notes: formNotes,
+        set_type: formSetType
       } : ex));
-      
       toggleExpand(id);
     } catch (e: any) {
       Alert.alert('Erro', e.message);
@@ -179,13 +230,12 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
     try {
       await reorderPlannedExercises(updates);
     } catch (e: any) {
-      Alert.alert('Erro', 'Falha ao salvar nova ordem.');
+      Alert.alert('Erro', 'Falha ao salvar ordem.');
     } finally {
       setIsReordering(false);
     }
   };
 
-  // --- FUNÇÃO DE IA (ATUALIZADA) ---
   const handleAiImport = async () => {
     if (!aiText.trim()) return;
     setAiLoading(true);
@@ -197,30 +247,48 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
       });
 
       if (error) throw error;
-      if (!data || !data.data || !Array.isArray(data.data)) throw new Error("Resposta inválida da IA");
+      if (!data || !data.data) throw new Error("Resposta inválida da IA");
 
-      const parsedExercises = data.data;
+      const responseData = data.data;
+      let parsedExercises: any[] = [];
+
+      if (responseData.days && Array.isArray(responseData.days)) {
+         responseData.days.forEach((day: any) => {
+            if (day.exercises && Array.isArray(day.exercises)) {
+                parsedExercises = [...parsedExercises, ...day.exercises];
+            }
+         });
+      } else if (Array.isArray(responseData)) {
+         parsedExercises = responseData;
+      }
+
+      if (parsedExercises.length === 0) throw new Error("Nenhum exercício identificado.");
+
       let addedCount = 0;
 
       for (const ex of parsedExercises) {
         let defId = ex.definition_id;
 
-        // Validação de Segurança (ID existe?)
         if (defId) {
            const existsLocally = allExercises.find(e => e.exercise_id === defId);
-           if (!existsLocally) {
-              defId = null; 
-           }
+           if (!existsLocally) defId = null; 
         }
 
-        // Se não tem ID válido, cria o exercício
         if (!defId) {
           const newDef = await handleCreateExercise(ex.name, { silent: true });
           if (newDef) defId = newDef.exercise_id;
         }
 
         if (defId) {
-          // [CORREÇÃO] Passamos os dados extraídos (sets, reps, rpe) para o service
+          let detectedType: SetType = ex.set_type || 'normal';
+          if (detectedType === 'normal') {
+             const fullText = (ex.name + ' ' + (ex.notes || '')).toLowerCase();
+             if (fullText.includes('drop')) detectedType = 'drop';
+             else if (fullText.includes('warmup') || fullText.includes('aquec')) detectedType = 'warmup';
+             else if (fullText.includes('rest pause') || fullText.includes('rest-pause')) detectedType = 'rest_pause';
+             else if (fullText.includes('cluster')) detectedType = 'cluster';
+          }
+
           await addPlannedExercise(
             workout.id, 
             defId, 
@@ -229,7 +297,8 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
               sets: ex.sets,
               reps: ex.reps,
               rpe: ex.rpe,
-              notes: ex.notes
+              notes: ex.notes,
+              set_type: detectedType
             }
           );
           
@@ -251,6 +320,14 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
 
   const renderItem = ({ item, drag, isActive }: RenderItemParams<PlannedExercise>) => {
     const isExpanded = expandedId === item.id;
+    const typeLabel = (t?: string) => {
+        if (!t || t === 'normal') return null;
+        if (t === 'drop') return 'DROP';
+        if (t === 'rest_pause') return 'R-PAUSE';
+        if (t === 'warmup') return 'AQUEC.';
+        if (t === 'cluster') return 'CLUSTER';
+        return t.toUpperCase();
+    }
 
     return (
       <ScaleDecorator>
@@ -265,16 +342,33 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
           <View style={styles.cardHeader}>
             <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
               <Feather name="menu" size={20} color="#CBD5E0" style={{ marginRight: 12 }} />
-              <View>
-                <Text style={styles.exName}>{item.definition?.name || 'Exercício'}</Text>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={styles.exName}>{item.definition?.name || 'Exercício'}</Text>
+                    {item.set_type && item.set_type !== 'normal' && (
+                        <View style={styles.miniBadge}>
+                            <Text style={styles.miniBadgeText}>{typeLabel(item.set_type)}</Text>
+                        </View>
+                    )}
+                </View>
                 {!isExpanded && (
-                  <Text style={styles.summaryText}>
+                  <Text style={styles.summaryText} numberOfLines={1}>
                     {item.sets_count || '?'} x {item.reps_range || '?'} {item.rpe_target ? `@ RPE ${item.rpe_target}` : ''}
                   </Text>
                 )}
               </View>
             </View>
-            <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color="#A0AEC0" />
+            
+            <View style={styles.headerActions}>
+                <TouchableOpacity 
+                    style={styles.actionIconBtn} 
+                    onPress={() => handleOpenFeedback(item.definition_id, item.definition?.name || '')}
+                >
+                    <Feather name="message-circle" size={20} color="#805AD5" />
+                </TouchableOpacity>
+
+                <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={20} color="#A0AEC0" />
+            </View>
           </View>
           
           {isExpanded && (
@@ -282,40 +376,40 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
               <View style={styles.row}>
                 <View style={styles.col}>
                   <Text style={styles.label}>Séries</Text>
-                  <TextInput 
-                    style={styles.input} 
-                    keyboardType="numeric" 
-                    value={formSets} 
-                    onChangeText={setFormSets}
-                    placeholder="3" 
-                  />
+                  <TextInput style={styles.input} keyboardType="numeric" value={formSets} onChangeText={setFormSets} placeholder="3" />
                 </View>
                 <View style={[styles.col, { flex: 2 }]}>
-                  <Text style={styles.label}>Reps (ex: 8-12)</Text>
-                  <TextInput 
-                    style={styles.input} 
-                    value={formReps} 
-                    onChangeText={setFormReps}
-                    placeholder="8-12" 
-                  />
+                  <Text style={styles.label}>Reps</Text>
+                  <TextInput style={styles.input} value={formReps} onChangeText={setFormReps} placeholder="8-12" />
                 </View>
                 <View style={styles.col}>
                   <Text style={styles.label}>RPE</Text>
-                  <TextInput 
-                    style={styles.input} 
-                    keyboardType="numeric" 
-                    value={formRpe} 
-                    onChangeText={setFormRpe}
-                    placeholder="8" 
-                  />
+                  <TextInput style={styles.input} keyboardType="numeric" value={formRpe} onChangeText={setFormRpe} placeholder="8" />
                 </View>
               </View>
 
-              <Text style={styles.label}>Notas</Text>
+              <View style={{ marginBottom: 16 }}>
+                <Text style={styles.label}>Técnica</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                    {(['normal', 'warmup', 'drop', 'rest_pause', 'cluster'] as SetType[]).map((type) => (
+                    <TouchableOpacity
+                        key={type}
+                        onPress={() => setFormSetType(type)}
+                        style={[styles.typeChip, formSetType === type && styles.typeChipActive]}
+                    >
+                        <Text style={[styles.typeChipText, formSetType === type && styles.typeChipTextActive]}>
+                        {type === 'normal' ? 'Normal' : type === 'warmup' ? 'Aquec.' : type.toUpperCase().replace('_', ' ')}
+                        </Text>
+                    </TouchableOpacity>
+                    ))}
+                </View>
+              </View>
+
+              <Text style={styles.label}>Notas para este treino</Text>
               <TextInput 
                 style={[styles.input, styles.textArea]} 
                 multiline 
-                placeholder="Detalhes técnicos..."
+                placeholder="Ex: Focar na excêntrica..."
                 value={formNotes}
                 onChangeText={setFormNotes}
               />
@@ -324,13 +418,8 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
                 <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
                   <Feather name="trash-2" size={18} color="#E53E3E" />
                 </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  onPress={() => handleSaveInline(item.id)} 
-                  style={styles.saveBtn}
-                  disabled={saving}
-                >
-                  {saving ? <ActivityIndicator color="#FFF" size="small"/> : <Text style={styles.saveText}>Salvar Alterações</Text>}
+                <TouchableOpacity onPress={() => handleSaveInline(item.id)} style={styles.saveBtn} disabled={saving}>
+                  {saving ? <ActivityIndicator color="#FFF" size="small"/> : <Text style={styles.saveText}>Salvar</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -351,97 +440,86 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
           onDragEnd={onDragEnd}
           renderItem={renderItem}
           contentContainerStyle={{ paddingBottom: 100 }}
-          ListEmptyComponent={<Text style={styles.emptyText}>Toque em "+" ou use a IA para adicionar exercícios.</Text>}
+          ListEmptyComponent={<Text style={styles.emptyText}>Adicione exercícios para começar.</Text>}
         />
       )}
 
-      <TouchableOpacity 
-        style={[styles.fab, styles.fabAi]} 
-        onPress={() => setIsAiModalVisible(true)}
-      >
+      <TouchableOpacity style={[styles.fab, styles.fabAi]} onPress={() => setIsAiModalVisible(true)}>
         <Feather name="cpu" size={24} color="#FFF" />
       </TouchableOpacity>
-
       <TouchableOpacity style={styles.fab} onPress={() => setIsPickerVisible(true)}>
         <Feather name="plus" size={24} color="#FFF" />
       </TouchableOpacity>
 
-      {/* MODAL DE IA */}
-      <Modal visible={isAiModalVisible} animationType="slide" presentationStyle="pageSheet">
-        <View style={styles.modalContainer}>
-           <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Prescrição Inteligente</Text>
-              <TouchableOpacity onPress={() => setIsAiModalVisible(false)}>
-                <Text style={styles.closeText}>Cancelar</Text>
-              </TouchableOpacity>
-           </View>
-           <View style={{padding: 16, flex: 1}}>
-              <Text style={styles.modalSub}>
-                 Cole seu treino abaixo (do WhatsApp, Bloco de Notas, etc). A IA vai identificar os exercícios e adicionar à lista.
-              </Text>
-              <TextInput 
-                 style={styles.aiInput}
-                 multiline
-                 placeholder="Ex: Supino Reto 3x10, Agachamento 4x8..."
-                 value={aiText}
-                 onChangeText={setAiText}
-                 autoFocus
-              />
-              <TouchableOpacity 
-                style={styles.aiButton} 
-                onPress={handleAiImport}
-                disabled={aiLoading}
-              >
-                 {aiLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.aiButtonText}>Processar Treino</Text>}
-              </TouchableOpacity>
-           </View>
-        </View>
+      <ExerciseFeedbackModal
+        visible={feedbackModalVisible}
+        onClose={() => setFeedbackModalVisible(false)}
+        definitionId={activeFeedbackDefId}
+        exerciseName={activeFeedbackName}
+        userId={resolvedStudentId || null} 
+      />
+
+      <Modal visible={isAiModalVisible} animationType="slide">
+         <View style={styles.modalContainer}>
+             <View style={{padding: 20, alignItems: 'flex-end'}}>
+                <TouchableOpacity onPress={() => setIsAiModalVisible(false)}>
+                    <Text style={{color: 'blue', fontSize: 16}}>Fechar</Text>
+                </TouchableOpacity>
+             </View>
+             <View style={{padding: 20}}>
+                <Text style={{fontSize: 18, fontWeight: 'bold', marginBottom: 10}}>Colar Treino (IA)</Text>
+                <TextInput 
+                    style={[styles.input, {height: 200, textAlignVertical: 'top'}]} 
+                    multiline 
+                    placeholder="Cole o treino aqui..." 
+                    value={aiText}
+                    onChangeText={setAiText}
+                />
+                <TouchableOpacity 
+                    style={[styles.saveBtn, {marginTop: 20, alignItems: 'center'}]} 
+                    onPress={handleAiImport}
+                    disabled={aiLoading}
+                >
+                    {aiLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>Processar</Text>}
+                </TouchableOpacity>
+             </View>
+         </View>
       </Modal>
 
-      {/* MODAL DE SELEÇÃO */}
-      <Modal visible={isPickerVisible} animationType="slide" presentationStyle="pageSheet">
-        <View style={styles.pickerContainer}>
-          <View style={styles.pickerHeader}>
-            <Text style={styles.pickerTitle}>Adicionar Exercício</Text>
-            <TouchableOpacity onPress={() => setIsPickerVisible(false)}>
-              <Text style={styles.closeText}>Fechar</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Buscar exercício..."
-            value={searchTerm}
-            onChangeText={setSearchTerm}
-            autoFocus
-          />
-
-          {searchTerm.length > 0 && (
-            <TouchableOpacity 
-              style={styles.createItem} 
-              onPress={handleCreateAndAdd}
-              disabled={creatingNew}
-            >
-              <View style={{flex: 1}}>
-                <Text style={styles.createItemTitle}>Criar "{searchTerm}"</Text>
-                <Text style={styles.createItemSubtitle}>Adicionar ao catálogo e ao treino</Text>
-              </View>
-              {creatingNew ? <ActivityIndicator color="#007AFF" /> : <Feather name="plus" size={20} color="#007AFF" />}
-            </TouchableOpacity>
-          )}
-
-          <FlatList
-            data={filteredExercises}
-            keyExtractor={(item: CatalogExerciseItem) => item.exercise_id}
-            renderItem={({ item }: { item: CatalogExerciseItem }) => (
-              <TouchableOpacity style={styles.pickerItem} onPress={() => handleAdd(item.exercise_id)}>
-                <Text style={styles.pickerItemText}>{item.exercise_name_capitalized}</Text>
-                <Feather name="plus-circle" size={20} color="#007AFF" />
-              </TouchableOpacity>
-            )}
-          />
-        </View>
+      <Modal visible={isPickerVisible} animationType="slide">
+         <View style={styles.pickerContainer}>
+            <View style={styles.pickerHeader}>
+                <Text style={styles.pickerTitle}>Adicionar Exercício</Text>
+                <TouchableOpacity onPress={() => setIsPickerVisible(false)}><Text style={styles.closeText}>Fechar</Text></TouchableOpacity>
+            </View>
+            <TextInput style={styles.searchInput} placeholder="Buscar..." value={searchTerm} onChangeText={setSearchTerm} />
+            <FlatList 
+                data={filteredExercises} 
+                keyExtractor={i => i.exercise_id} 
+                renderItem={({item}) => (
+                    <TouchableOpacity style={styles.pickerItem} onPress={() => handleAdd(item.exercise_id)}>
+                        <Text style={styles.pickerItemText}>{item.exercise_name_capitalized}</Text>
+                        <Feather name="plus-circle" size={24} color="#007AFF" />
+                    </TouchableOpacity>
+                )}
+                // [NOVO] Componente para Criar Exercício se não encontrar ou se quiser forçar
+                ListEmptyComponent={() => (
+                  searchTerm.length > 2 ? (
+                    <TouchableOpacity style={styles.createItem} onPress={handleCreateAndAdd} disabled={creatingNew}>
+                       <View style={{flex: 1}}>
+                         <Text style={styles.createItemTitle}>"{searchTerm}" não encontrado</Text>
+                         <Text style={styles.createItemSub}>Toque aqui para criar e adicionar agora.</Text>
+                       </View>
+                       {creatingNew ? <ActivityIndicator color="#38A169" /> : <Feather name="plus-square" size={28} color="#38A169" />}
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={styles.emptyPickerText}>Digite o nome do exercício...</Text>
+                  )
+                )}
+            />
+         </View>
       </Modal>
+
     </KeyboardAvoidingView>
   );
 }
@@ -449,21 +527,16 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7FAFC', padding: 16 },
   emptyText: { textAlign: 'center', color: '#A0AEC0', marginTop: 40 },
-  
-  card: {
-    backgroundColor: '#FFF',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
-    shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 3, elevation: 1,
-    borderWidth: 1, borderColor: '#EDF2F7',
-    overflow: 'hidden'
-  },
+  card: { backgroundColor: '#FFF', padding: 12, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: '#EDF2F7', overflow: 'hidden' },
   cardActive: { borderColor: '#007AFF', backgroundColor: '#F0F9FF', elevation: 5 },
-  
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  exName: { fontSize: 16, fontWeight: '600', color: '#2D3748' },
+  exName: { fontSize: 16, fontWeight: '600', color: '#2D3748', flexShrink: 1 },
   summaryText: { fontSize: 13, color: '#718096', marginTop: 2 },
+  miniBadge: { backgroundColor: '#EBF8FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  miniBadgeText: { fontSize: 10, color: '#007AFF', fontWeight: 'bold' },
+  
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  actionIconBtn: { padding: 4 },
 
   editorBody: { marginTop: 12, borderTopWidth: 1, borderTopColor: '#F7FAFC', paddingTop: 12 },
   row: { flexDirection: 'row', gap: 10, marginBottom: 12 },
@@ -471,46 +544,30 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: '#718096', marginBottom: 4, fontWeight: '600' },
   input: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 8, fontSize: 15, color: '#2D3748', backgroundColor: '#F9FAFB' },
   textArea: { height: 60, textAlignVertical: 'top' },
-  
+  typeChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#FFF' },
+  typeChipActive: { backgroundColor: '#EBF8FF', borderColor: '#007AFF' },
+  typeChipText: { fontSize: 12, color: '#718096' },
+  typeChipTextActive: { color: '#007AFF', fontWeight: 'bold' },
   cardActions: { flexDirection: 'row', marginTop: 16, justifyContent: 'space-between', alignItems: 'center' },
   deleteBtn: { padding: 10, backgroundColor: '#FFF5F5', borderRadius: 8 },
   saveBtn: { backgroundColor: '#007AFF', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
   saveText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
-
-  fab: {
-    position: 'absolute', bottom: 24, right: 24,
-    width: 56, height: 56,
-    backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center',
-    borderRadius: 28, elevation: 5,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4
-  },
-  fabAi: {
-    bottom: 96, 
-    backgroundColor: '#805AD5',
-  },
-
-  pickerContainer: { flex: 1, backgroundColor: '#F7FAFC', paddingTop: 10 },
-  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, alignItems: 'center' },
+  fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', borderRadius: 28, elevation: 5 },
+  fabAi: { bottom: 96, backgroundColor: '#805AD5' },
+  
+  pickerContainer: { flex: 1, backgroundColor: '#F7FAFC', paddingTop: 40 },
+  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16 },
   pickerTitle: { fontSize: 18, fontWeight: 'bold' },
   closeText: { color: '#007AFF', fontSize: 16 },
-  searchInput: { margin: 16, marginTop: 0, backgroundColor: '#FFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0', fontSize: 16 },
-  
-  createItem: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: '#EBF8FF', marginHorizontal: 16, marginBottom: 10, padding: 12,
-    borderRadius: 8, borderWidth: 1, borderColor: '#BEE3F8'
-  },
-  createItemTitle: { fontWeight: 'bold', color: '#2B6CB0' },
-  createItemSubtitle: { fontSize: 12, color: '#4A5568' },
-  
-  pickerItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#EDF2F7' },
+  searchInput: { margin: 16, marginTop: 0, backgroundColor: '#FFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  pickerItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#EDF2F7', alignItems: 'center' },
   pickerItemText: { fontSize: 16, color: '#2D3748' },
+  
+  // [NOVO] Estilos do item de criação
+  createItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0FFF4', padding: 16, margin: 16, borderRadius: 12, borderWidth: 1, borderColor: '#C6F6D5' },
+  createItemTitle: { fontSize: 16, fontWeight: '700', color: '#276749' },
+  createItemSub: { fontSize: 13, color: '#2F855A' },
+  emptyPickerText: { textAlign: 'center', marginTop: 40, color: '#A0AEC0', fontSize: 16 },
 
-  modalContainer: { flex: 1, backgroundColor: '#F7FAFC' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#2D3748' },
-  modalSub: { fontSize: 14, color: '#718096', marginBottom: 16 },
-  aiInput: { flex: 1, backgroundColor: '#FFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 16, fontSize: 16, textAlignVertical: 'top', marginBottom: 16 },
-  aiButton: { backgroundColor: '#805AD5', padding: 16, borderRadius: 12, alignItems: 'center' },
-  aiButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
+  modalContainer: { flex: 1, backgroundColor: '#F7FAFC' }
 });

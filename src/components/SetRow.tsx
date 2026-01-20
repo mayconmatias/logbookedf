@@ -11,6 +11,10 @@ interface SetRowProps {
   exerciseName: string;
   isPR: boolean;
   isFetchingShareData: boolean;
+  
+  // [NOVO] Propriedade para indicar destaque
+  isEditing?: boolean; 
+  
   onEdit: (set: WorkoutSet) => void; 
   onShare: (set: WorkoutSet, isPR: boolean, exerciseName: string, definitionId: string) => void;
   onDelete: (setId: string, exerciseId: string, definitionId: string) => void;
@@ -25,11 +29,13 @@ const SetRow = memo(
     exerciseName,
     isPR,
     isFetchingShareData,
+    isEditing, // [NOVO] Recebendo a prop
     onEdit,   
     onShare,  
     onDelete,
   }: SetRowProps) => {
     
+    // ... (Lógica de childSets e displayNumber mantida igual) ...
     const childSets = useMemo(() => {
        if (!allSetsInExercise) return [];
        return allSetsInExercise.filter(s => s.parent_set_id === set.id);
@@ -77,7 +83,9 @@ const SetRow = memo(
           styles.container, 
           isPR && styles.prContainer, 
           isWarmup && styles.warmupContainer,
-          isSuper && styles.superContainer
+          isSuper && styles.superContainer,
+          // [NOVO] Aplica estilo de edição com prioridade
+          isEditing && styles.editingContainer 
         ]}
         onPress={handlePress}
         disabled={isFetchingShareData}
@@ -85,8 +93,16 @@ const SetRow = memo(
       >
         <View style={styles.contentRow}>
           <View style={styles.badgeColumn}>
-             <View style={[styles.setNumberBadge, isWarmup && styles.warmupBadge]}>
-                <Text style={[styles.setNumberText, isWarmup && styles.warmupText]}>
+             <View style={[
+               styles.setNumberBadge, 
+               isWarmup && styles.warmupBadge,
+               isEditing && styles.editingBadge // [NOVO] Badge destaca também
+             ]}>
+                <Text style={[
+                  styles.setNumberText, 
+                  isWarmup && styles.warmupText,
+                  isEditing && styles.editingBadgeText
+                ]}>
                   {isWarmup ? 'AQ' : '#'}{displayNumber}
                 </Text>
              </View>
@@ -95,11 +111,11 @@ const SetRow = memo(
 
           <View style={styles.dataColumn}>
              <View style={styles.mainLine}>
-                <Text style={styles.weightText}>
+                <Text style={[styles.weightText, isEditing && styles.editingText]}>
                    {set.weight} <Text style={styles.unit}>kg</Text>
                 </Text>
                 <Text style={styles.separator}>×</Text>
-                <Text style={styles.repsText}>
+                <Text style={[styles.repsText, isEditing && styles.editingText]}>
                    {set.reps} <Text style={styles.unit}>reps</Text>
                 </Text>
                 {set.rpe && (
@@ -108,7 +124,8 @@ const SetRow = memo(
                   </View>
                 )}
              </View>
-
+             
+             {/* ... (Resto do render: metaLine, obsText, childSets mantido igual) ... */}
              {(tagLabel || set.side) && (
                <View style={styles.metaLine}>
                   {tagLabel && <Text style={[styles.metaTag, { color: '#E53E3E' }]}>{tagLabel}</Text>}
@@ -142,14 +159,21 @@ const SetRow = memo(
           </View>
 
           <View style={styles.actionsColumn}>
-             {!isWarmup && (
-                <TouchableOpacity style={styles.actionBtn} onPress={handleShare}>
-                   <Feather name="share-2" size={16} color="#718096" />
-                </TouchableOpacity>
+             {/* [UX] Mostra ícone de edição se estiver editando */}
+             {isEditing ? (
+                <Feather name="edit-2" size={18} color="#3182CE" style={{ marginRight: 8 }} />
+             ) : (
+               <>
+                 {!isWarmup && (
+                    <TouchableOpacity style={styles.actionBtn} onPress={handleShare}>
+                       <Feather name="share-2" size={16} color="#718096" />
+                    </TouchableOpacity>
+                 )}
+                 <TouchableOpacity style={[styles.actionBtn, styles.deleteBtn]} onPress={handleDelete}>
+                    <Feather name="trash-2" size={16} color="#E53E3E" />
+                 </TouchableOpacity>
+               </>
              )}
-             <TouchableOpacity style={[styles.actionBtn, styles.deleteBtn]} onPress={handleDelete}>
-                <Feather name="trash-2" size={16} color="#E53E3E" />
-             </TouchableOpacity>
           </View>
         </View>
       </TouchableOpacity>
@@ -158,14 +182,31 @@ const SetRow = memo(
 );
 
 const styles = StyleSheet.create({
+  // ... (Estilos existentes)
   container: { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', paddingVertical: 10, paddingHorizontal: 12 },
   prContainer: { backgroundColor: '#FFFAF0' },
   warmupContainer: { backgroundColor: '#F7FAFC' },
   superContainer: { borderLeftWidth: 3, borderLeftColor: '#DD6B20' },
+  
+  // [NOVO] Estilo de Edição (Azul claro com borda esquerda azul forte)
+  editingContainer: { 
+    backgroundColor: '#EBF8FF', 
+    borderLeftWidth: 4, 
+    borderLeftColor: '#3182CE',
+    paddingLeft: 8 // Compensa a borda para alinhar
+  },
+  
   contentRow: { flexDirection: 'row', alignItems: 'flex-start' },
   badgeColumn: { width: 36, alignItems: 'center', marginRight: 10, paddingTop: 2 },
+  
   setNumberBadge: { backgroundColor: '#EDF2F7', borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2, minWidth: 24, alignItems: 'center' },
   warmupBadge: { backgroundColor: '#FEFCBF' },
+  
+  // [NOVO] Estilos de Badge e Texto em edição
+  editingBadge: { backgroundColor: '#3182CE' },
+  editingBadgeText: { color: '#FFFFFF' },
+  editingText: { color: '#2B6CB0' },
+
   setNumberText: { fontSize: 11, fontWeight: '900', color: '#4A5568' },
   warmupText: { color: '#D69E2E' },
   dataColumn: { flex: 1, justifyContent: 'center' },

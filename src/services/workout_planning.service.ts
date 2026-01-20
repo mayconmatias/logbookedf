@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabaseClient';
 import { PlannedWorkout, PlannedExercise } from '@/types/coaching';
+import { SetType } from '@/types/workout';
 
 // ============================================================
 // 1. GERENCIAMENTO DE DIAS DE TREINO (Planned Workouts)
@@ -10,7 +11,7 @@ export const fetchPlannedWorkouts = async (programId: string): Promise<PlannedWo
     .from('planned_workouts')
     .select('*')
     .eq('program_id', programId)
-    .order('day_order', { ascending: true }); // Garante ordem dos dias A, B, C
+    .order('day_order', { ascending: true });
 
   if (error) throw error;
   return data || [];
@@ -65,7 +66,7 @@ export const fetchPlannedExercises = async (plannedWorkoutId: string): Promise<P
       definition:exercise_definitions ( name )
     `)
     .eq('planned_workout_id', plannedWorkoutId)
-    .order('order_index', { ascending: true }); // [CRÍTICO] Garante a ordem visual na lista
+    .order('order_index', { ascending: true });
 
   if (error) throw error;
 
@@ -84,6 +85,7 @@ export const addPlannedExercise = async (
     reps?: string;
     rpe?: string;
     notes?: string;
+    set_type?: SetType; // [NOVO]
   }
 ) => {
   // 1. Buscar nota padrão do catálogo
@@ -106,6 +108,7 @@ export const addPlannedExercise = async (
       reps_range: overrides?.reps || '8-12',
       rpe_target: overrides?.rpe || '8',
       notes: notesToInsert,
+      set_type: overrides?.set_type || 'normal' // [NOVO] Default para 'normal'
     });
 
   if (error) throw error;

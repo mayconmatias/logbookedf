@@ -1,22 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
   StyleSheet, 
   TouchableOpacity, 
   Dimensions,
-  Platform,
-  TouchableWithoutFeedback,
-  TextInput,
-  Alert,
-  Keyboard
+  Modal,
+  FlatList,
+  Alert // [NOVO]
 } from 'react-native';
-import { triggerHaptic } from '@/utils/haptics';
 import { Feather } from '@expo/vector-icons';
 import { useTimer } from '@/context/TimerContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { triggerHaptic } from '@/utils/haptics';
 import { navigate } from '@/utils/navigationRef'; 
-import AsyncStorage from '@react-native-async-storage/async-storage'; // [NOVO] Import para ler a sessão
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { 
@@ -34,23 +32,18 @@ const FAB_SIZE = 60;
 const SATELLITE_SIZE = 44;
 const RADIUS = 110; 
 const MARGIN = 20;
-
-// Chave usada no workouts.service.ts para persistir a sessão atual
 const SESSION_KEY = '@sessionWorkoutId';
 
+// Configuração Wheel Picker
+const ITEM_HEIGHT = 50; 
+const TIME_OPTIONS = Array.from({ length: 20 }, (_, i) => (i + 1) * 15);
+
+// --- COMPONENTE SATÉLITE ---
 const SatelliteButton = ({ 
-  index, 
-  totalItems, 
-  isOpen, 
-  onPress, 
-  onLongPress,
-  children, 
-  isLocked,
-  style 
+  index, totalItems, isOpen, onPress, onLongPress, children, isLocked, style 
 }: any) => {
   const startAngle = -90; 
   const angleSpan = 100; 
-  
   const step = totalItems > 1 ? angleSpan / (totalItems - 1) : 0;
   const angleDeg = startAngle + (index * step);
   const angleRad = angleDeg * (Math.PI / 180);
@@ -60,7 +53,7 @@ const SatelliteButton = ({
 
   const animVal = useSharedValue(0);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (isOpen) {
       animVal.value = withDelay(index * 40, withSpring(1, { damping: 14, stiffness: 120 }));
     } else {
@@ -68,25 +61,19 @@ const SatelliteButton = ({
     }
   }, [isOpen]);
 
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { translateX: interpolate(animVal.value, [0, 1], [0, targetX]) },
-        { translateY: interpolate(animVal.value, [0, 1], [0, targetY]) },
-        { scale: animVal.value },
-      ],
-      opacity: animVal.value,
-    };
-  });
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: interpolate(animVal.value, [0, 1], [0, targetX]) },
+      { translateY: interpolate(animVal.value, [0, 1], [0, targetY]) },
+      { scale: animVal.value },
+    ],
+    opacity: animVal.value,
+  }));
 
   return (
     <Animated.View style={[styles.satelliteContainer, animatedStyle]}>
       <TouchableOpacity 
-        style={[
-          styles.satelliteBtnBase, 
-          style,
-          isLocked && styles.satelliteLocked 
-        ]} 
+        style={[styles.satelliteBtnBase, style, isLocked && styles.satelliteLocked]} 
         onPress={onPress}
         onLongPress={isLocked ? undefined : onLongPress} 
         delayLongPress={300}
@@ -106,21 +93,19 @@ export default function RestTimer() {
   } = useTimer();
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isAddingMode, setIsAddingMode] = useState(false);
-  
-  const [newMin, setNewMin] = useState('');
-  const [newSec, setNewSec] = useState('');
+  const [isWheelModalVisible, setIsWheelModalVisible] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false); 
+  const [selectedCustomTime, setSelectedCustomTime] = useState(60);
 
   const insets = useSafeAreaInsets();
 
+  // --- GESTOS ---
   const x = useSharedValue(MARGIN);
   const y = useSharedValue(height - insets.bottom - 150);
-  
   const contextX = useSharedValue(0);
   const contextY = useSharedValue(0);
 
   const panGesture = Gesture.Pan()
-    .enabled(!isAddingMode)
     .onStart(() => {
       contextX.value = x.value;
       contextY.value = y.value;
@@ -130,14 +115,11 @@ export default function RestTimer() {
       y.value = contextY.value + event.translationY;
     })
     .onEnd(() => {
-      const minX = MARGIN;
-      const maxX = width - FAB_SIZE - MARGIN;
+      if (x.value < width / 2) x.value = withSpring(MARGIN);
+      else x.value = withSpring(width - FAB_SIZE - MARGIN);
+      
       const minY = insets.top + MARGIN;
       const maxY = height - insets.bottom - FAB_SIZE - MARGIN;
-
-      if (x.value < width / 2) x.value = withSpring(minX);
-      else x.value = withSpring(maxX);
-
       if (y.value < minY) y.value = withSpring(minY);
       else if (y.value > maxY) y.value = withSpring(maxY);
     });
@@ -162,110 +144,75 @@ export default function RestTimer() {
   };
 
   const handleMainTap = () => {
-    if (isAddingMode) return;
-    if (isActive || isOvertime) {
+    if (isOvertime) {
+      setIsMinimized(false);
+    } else if (isActive) {
       setIsMenuOpen(!isMenuOpen);
     } else {
       startTimer();
     }
   };
 
-  const handleStop = () => {
-    stopTimer();
-    setIsMenuOpen(false);
-  };
-
-  // [CORREÇÃO] Lógica aprimorada para retomar a sessão correta
-  const handleNextSet = async () => {
-    stopTimer();
-    
-    try {
-      // Tenta recuperar o ID da sessão ativa do armazenamento local
-      const currentSessionId = await AsyncStorage.getItem(SESSION_KEY);
-
-      if (currentSessionId) {
-         // Se existe uma sessão ativa (seja livre ou programa), forçamos a navegação para ela
-         navigate('LogWorkout', { workoutId: currentSessionId });
-      } else {
-         // Fallback: comportamento padrão (LogWorkout tentará encontrar ou criar)
-         navigate('LogWorkout');
-      }
-    } catch (error) {
-      console.log("Erro ao navegar via Timer:", error);
-      navigate('LogWorkout');
+  const handleStartCustom = () => {
+    const newPresets = [...presets];
+    if (!newPresets.includes(selectedCustomTime)) {
+        newPresets.push(selectedCustomTime);
+        newPresets.sort((a, b) => a - b);
+        updatePresets(newPresets);
     }
-  };
-
-  const handleSelectPreset = (index: number) => {
-    if (!isPro && index !== 0) {
-      // SUBSTITUIR: if (Platform.OS !== 'web') Vibration.vibrate(50);
-      triggerHaptic('error'); // Ou 'warning', para indicar bloqueio
-      return;
-    }
-    selectPreset(index);
-    setIsMenuOpen(false);
-  };
-
-  const handleDeletePreset = (secsToDelete: number) => {
-    if (!isPro) {
-       Alert.alert('Funcionalidade PRO', 'Apenas usuários PRO podem editar os tempos.');
-       return;
-    }
-    if (presets.length <= 1) {
-      Alert.alert('Erro', 'Você precisa ter pelo menos um tempo configurado.');
-      return;
-    }
-    Alert.alert('Remover Tempo', `Deseja remover este preset?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      { 
-        text: 'Remover', 
-        style: 'destructive', 
-        onPress: () => {
-          const newPresets = presets.filter(s => s !== secsToDelete);
-          updatePresets(newPresets);
-          // SUBSTITUIR: if (Platform.OS !== 'web') Vibration.vibrate(50);
-          triggerHaptic('light');
-        }
-      }
-    ]);
-  };
-
-  const handleStartAdd = () => {
-    if (!isPro) {
-      setIsMenuOpen(false);
-      Alert.alert('Funcionalidade PRO', 'Assine para criar tempos de descanso personalizados.', [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Ver Planos', onPress: () => navigate('CoachPaywall') }
-      ]);
-      return;
-    }
-    setIsMenuOpen(false);
-    setTimeout(() => setIsAddingMode(true), 200);
-  };
-
-  const handleConfirmAdd = async () => {
-    const m = parseInt(newMin || '0', 10);
-    const s = parseInt(newSec || '0', 10);
-    const total = (m * 60) + s;
-    if (total <= 0) {
-      Alert.alert('Erro', 'O tempo deve ser maior que zero.');
-      return;
-    }
-    const newPresets = [...presets, total];
-    const uniqueSorted = Array.from(new Set(newPresets)).sort((a, b) => a - b);
-    await updatePresets(uniqueSorted);
-    
-    const newIndex = uniqueSorted.indexOf(total);
+    const newIndex = newPresets.indexOf(selectedCustomTime);
     if (newIndex !== -1) selectPreset(newIndex);
     
-    handleCancelAdd();
+    startTimer(selectedCustomTime);
+    setIsWheelModalVisible(false);
+    setIsMenuOpen(false);
   };
 
-  const handleCancelAdd = () => {
-    setNewMin('');
-    setNewSec('');
-    setIsAddingMode(false);
-    Keyboard.dismiss();
+  const handleOpenWheelPicker = () => {
+    if (!isPro) {
+      setIsMenuOpen(false);
+      navigate('CoachPaywall'); 
+      return;
+    }
+    setIsMenuOpen(false);
+    setIsWheelModalVisible(true);
+  };
+
+  // [NOVO] Função para Deletar Preset
+  const handleDeletePreset = (secsToDelete: number) => {
+    if (!isPro) return; // Segurança extra
+    
+    if (presets.length <= 1) {
+      Alert.alert('Erro', 'Você deve manter pelo menos um tempo de descanso.');
+      return;
+    }
+
+    Alert.alert(
+      'Remover Tempo',
+      `Deseja apagar o timer de ${formatLabel(secsToDelete)}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { 
+          text: 'Apagar', 
+          style: 'destructive',
+          onPress: () => {
+            const newPresets = presets.filter(p => p !== secsToDelete);
+            updatePresets(newPresets);
+            triggerHaptic('success');
+          }
+        }
+      ]
+    );
+  };
+
+  const handleNextSet = async () => {
+    stopTimer();
+    setIsMinimized(false);
+    try {
+      const currentSessionId = await AsyncStorage.getItem(SESSION_KEY);
+      if (currentSessionId) navigate('LogWorkout', { workoutId: currentSessionId });
+      else navigate('LogWorkout');
+    } catch (e) { navigate('LogWorkout'); }
   };
 
   const menuItems = [];
@@ -273,192 +220,184 @@ export default function RestTimer() {
   if (isActive || isOvertime) {
     menuItems.push({
       key: 'stop',
-      component: (
-        <View style={styles.stopIconWrapper}>
-          <View style={styles.stopSquare} />
-        </View>
-      ),
-      onPress: handleStop,
-      isStop: true,
-      isSelected: false,
-      onLongPress: undefined,
-      isLocked: false 
+      component: <View style={styles.stopIconWrapper}><View style={styles.stopSquare} /></View>,
+      onPress: () => { stopTimer(); setIsMenuOpen(false); setIsMinimized(false); },
+      isStop: true
     });
   }
 
   presets.forEach((secs, idx) => {
     const isLocked = !isPro && idx !== 0;
-    const isSelected = activePresetIndex === idx;
-    
     menuItems.push({
       key: `preset-${idx}`,
       component: (
         <>
-          <Text style={[
-            styles.satelliteText, 
-            isSelected && { color: '#FFF', fontWeight: 'bold' },
-            isLocked && { color: '#A0AEC0' } 
-          ]}>
-            {formatLabel(secs)}
-          </Text>
+          <Text style={[styles.satelliteText, activePresetIndex === idx && { color: '#FFF', fontWeight: 'bold' }]}>{formatLabel(secs)}</Text>
           {isLocked && <Feather name="lock" size={8} color="#A0AEC0" style={styles.lockIcon} />}
         </>
       ),
-      onPress: () => handleSelectPreset(idx),
-      onLongPress: isLocked ? undefined : () => handleDeletePreset(secs), 
-      isSelected,
-      isStop: false,
-      isLocked 
+      onPress: () => { 
+        if (!isLocked) { selectPreset(idx); setIsMenuOpen(false); } 
+        else triggerHaptic('error');
+      },
+      // [NOVO] Adicionado evento de Long Press
+      onLongPress: !isLocked ? () => handleDeletePreset(secs) : undefined,
+      isSelected: activePresetIndex === idx,
+      isLocked
     });
   });
 
   menuItems.push({
     key: 'add-btn',
-    component: (
-      <View>
-        <Feather name="plus" size={20} color={isPro ? "#007AFF" : "#A0AEC0"} />
-        {!isPro && <Feather name="lock" size={8} color="#A0AEC0" style={styles.lockIcon} />}
-      </View>
-    ),
-    onPress: handleStartAdd,
-    isSelected: false,
-    isStop: false,
+    component: <View><Feather name="edit-2" size={20} color={isPro ? "#007AFF" : "#A0AEC0"} /></View>,
+    onPress: handleOpenWheelPicker,
     isAdd: true,
-    onLongPress: undefined,
     isLocked: !isPro
   });
 
-  // --- TELA VERMELHA DE OVERTIME ---
-  if (isOvertime && !isMenuOpen && !isAddingMode) {
-     return (
-      <View style={[styles.alertOverlay, { paddingBottom: insets.bottom + 20 }]}>
-        <View style={styles.alertCard}>
-          <View style={styles.alertHeader}>
-            <Feather name="bell" size={28} color="#FFF" style={{ marginRight: 10 }} />
-            <Text style={styles.alertTitle}>DESCANSO FINALIZADO</Text>
-          </View>
-          <Text style={styles.overtimeText}>{formatTime(secondsRemaining)}</Text>
-          
-          <TouchableOpacity style={styles.alertButton} onPress={handleNextSet}>
-            <Text style={styles.alertButtonText}>PRÓXIMA SÉRIE</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  // --- RENDERIZADORES ---
 
   return (
     <>
-      {(isMenuOpen || isAddingMode) && (
-        <TouchableWithoutFeedback onPress={() => {
-           if (isAddingMode) handleCancelAdd();
-           else setIsMenuOpen(false);
-        }}>
-          <View style={styles.overlay} />
-        </TouchableWithoutFeedback>
+      {isMenuOpen && (
+        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setIsMenuOpen(false)} />
       )}
 
       <GestureDetector gesture={panGesture}>
         <Animated.View style={[styles.fabContainer, fabStyle]}>
-          
-          {isAddingMode && (
-            <View style={styles.addFormContainer}>
-               <Text style={styles.addFormTitle}>Novo Tempo</Text>
-               <View style={styles.inputsRow}>
-                 <TextInput 
-                   style={styles.timeInput} 
-                   placeholder="0" 
-                   keyboardType="number-pad"
-                   value={newMin}
-                   onChangeText={setNewMin}
-                   maxLength={2}
-                   autoFocus
-                 />
-                 <Text style={styles.timeSep}>m</Text>
-                 <TextInput 
-                   style={styles.timeInput} 
-                   placeholder="00" 
-                   keyboardType="number-pad"
-                   value={newSec}
-                   onChangeText={setNewSec}
-                   maxLength={2}
-                 />
-                 <Text style={styles.timeSep}>s</Text>
-               </View>
-               <View style={styles.formActions}>
-                 <TouchableOpacity onPress={handleCancelAdd} style={styles.formBtnCancel}>
-                    <Feather name="x" size={18} color="#E53E3E" />
-                 </TouchableOpacity>
-                 <TouchableOpacity onPress={handleConfirmAdd} style={styles.formBtnConfirm}>
-                    <Feather name="check" size={18} color="#FFF" />
-                 </TouchableOpacity>
-               </View>
-            </View>
-          )}
-
-          {!isAddingMode && (
-             <View style={styles.satellitesLayer}>
-              {menuItems.map((item, idx) => (
-                <SatelliteButton
-                  key={item.key}
-                  index={idx}
-                  totalItems={menuItems.length}
-                  isOpen={isMenuOpen}
-                  onPress={item.onPress}
-                  onLongPress={item.onLongPress}
-                  isLocked={item.isLocked}
-                  style={[
-                    styles.satelliteBtnBase,
-                    item.isStop 
-                      ? styles.satelliteStop 
-                      : (item.isSelected ? styles.satelliteSelected : styles.satelliteNormal),
-                    item.isAdd && styles.satelliteAdd,
-                    item.isLocked && styles.satelliteLocked
-                  ]}
-                >
-                  {item.component}
-                </SatelliteButton>
-              ))}
-            </View>
-          )}
+          <View style={styles.satellitesLayer}>
+            {menuItems.map((item, idx) => (
+              <SatelliteButton
+                key={item.key}
+                index={idx}
+                totalItems={menuItems.length}
+                isOpen={isMenuOpen}
+                onPress={item.onPress}
+                onLongPress={item.onLongPress} // [NOVO] Passando a prop
+                isLocked={item.isLocked}
+                style={[
+                  styles.satelliteBtnBase,
+                  item.isStop ? styles.satelliteStop : (item.isSelected ? styles.satelliteSelected : styles.satelliteNormal),
+                  item.isAdd && styles.satelliteAdd,
+                  item.isLocked && styles.satelliteLocked
+                ]}
+              >
+                {item.component}
+              </SatelliteButton>
+            ))}
+          </View>
 
           <TouchableOpacity 
             style={[
               styles.fab, 
               isActive ? styles.fabActive : styles.fabIdle,
               isOvertime && styles.fabOvertime,
-              isAddingMode && styles.fabHidden
             ]} 
             onPress={handleMainTap}
-            onLongPress={() => {
-              if (isAddingMode) return;
-              triggerHaptic('medium');              setIsMenuOpen(true);
-            }}
+            onLongPress={() => { triggerHaptic('medium'); setIsMenuOpen(true); }}
             delayLongPress={300}
             activeOpacity={0.9}
           >
-            {isActive ? (
+            {isActive || isOvertime ? (
               <Text style={styles.fabTimerText}>{formatTime(secondsRemaining)}</Text>
             ) : (
-              <Feather name={isAddingMode ? "edit-2" : "clock"} size={28} color="#FFF" />
+              <Feather name="clock" size={28} color="#FFF" />
             )}
           </TouchableOpacity>
-
         </Animated.View>
       </GestureDetector>
+
+      {/* --- MODAL DE OVERTIME (Estilo Card Branco, Não Tela Vermelha) --- */}
+      {isOvertime && !isMinimized && (
+        <View style={styles.overtimeOverlay}>
+           <View style={styles.overtimeCard}>
+              
+              {/* Header com Minimizar */}
+              <View style={styles.overtimeHeader}>
+                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                    <Feather name="bell" size={20} color="#E53E3E" />
+                    <Text style={styles.overtimeTitle}>Descanso Finalizado</Text>
+                 </View>
+                 <TouchableOpacity onPress={() => setIsMinimized(true)} style={styles.minimizeBtn}>
+                    <Feather name="minimize-2" size={20} color="#718096" />
+                 </TouchableOpacity>
+              </View>
+
+              {/* Tempo Gigante */}
+              <View style={styles.overtimeBody}>
+                 <Text style={styles.overtimeTime}>{formatTime(secondsRemaining)}</Text>
+              </View>
+
+              {/* Ação Principal */}
+              <TouchableOpacity style={styles.overtimeActionBtn} onPress={handleNextSet}>
+                 <Text style={styles.overtimeActionText}>PRÓXIMA SÉRIE</Text>
+                 <Feather name="arrow-right" size={20} color="#FFF" />
+              </TouchableOpacity>
+
+           </View>
+        </View>
+      )}
+
+      {/* --- MODAL WHEEL PICKER --- */}
+      <Modal visible={isWheelModalVisible} transparent animationType="fade" onRequestClose={() => setIsWheelModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+           <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Tempo de Descanso</Text>
+              <View style={styles.wheelContainer}>
+                 <View style={styles.wheelHighlight} />
+                 <FlatList
+                    data={TIME_OPTIONS}
+                    keyExtractor={item => item.toString()}
+                    showsVerticalScrollIndicator={false}
+                    snapToInterval={ITEM_HEIGHT}
+                    decelerationRate="fast"
+                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                    getItemLayout={(_, index) => ({ length: ITEM_HEIGHT, offset: ITEM_HEIGHT * index, index })}
+                    onMomentumScrollEnd={(ev) => {
+                       const index = Math.round(ev.nativeEvent.contentOffset.y / ITEM_HEIGHT);
+                       if (TIME_OPTIONS[index]) {
+                          setSelectedCustomTime(TIME_OPTIONS[index]);
+                          triggerHaptic('selection');
+                       }
+                    }}
+                    renderItem={({ item }) => (
+                       <TouchableOpacity 
+                          style={[styles.pickerItem, { height: ITEM_HEIGHT }]} 
+                          onPress={() => setSelectedCustomTime(item)}
+                       >
+                          <Text style={[styles.pickerText, selectedCustomTime === item && styles.pickerTextSelected]}>
+                             {formatLabel(item)}
+                          </Text>
+                       </TouchableOpacity>
+                    )}
+                 />
+              </View>
+              <View style={styles.modalActions}>
+                 <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setIsWheelModalVisible(false)}>
+                    <Feather name="x" size={24} color="#A0AEC0" />
+                 </TouchableOpacity>
+                 <TouchableOpacity style={styles.modalBtnStart} onPress={handleStartCustom}>
+                    <Feather name="play" size={24} color="#FFF" />
+                    <Text style={styles.btnStartText}>INICIAR</Text>
+                 </TouchableOpacity>
+              </View>
+           </View>
+        </View>
+      </Modal>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 998, backgroundColor: 'rgba(0,0,0,0.3)' },
-  fabContainer: { position: 'absolute', top: 0, left: 0, width: FAB_SIZE, height: FAB_SIZE, justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  fab: { width: FAB_SIZE, height: FAB_SIZE, borderRadius: FAB_SIZE / 2, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65, elevation: 8, borderWidth: 2, borderColor: '#FFF', zIndex: 1001, backgroundColor: '#718096' },
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 998 },
+  fabContainer: { position: 'absolute', width: FAB_SIZE, height: FAB_SIZE, justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  
+  fab: { width: FAB_SIZE, height: FAB_SIZE, borderRadius: FAB_SIZE / 2, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65, elevation: 8, borderWidth: 2, borderColor: '#FFF', zIndex: 1001 },
   fabIdle: { backgroundColor: '#718096' },
   fabActive: { backgroundColor: '#007AFF', borderColor: '#1A202C' },
   fabOvertime: { backgroundColor: '#E53E3E', borderColor: '#FFF' },
-  fabHidden: { opacity: 0 },
-  fabTimerText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
+  fabTimerText: { color: '#FFF', fontWeight: 'bold', fontSize: 13 },
+
   satellitesLayer: { position: 'absolute', zIndex: 999 },
   satelliteContainer: { position: 'absolute', width: SATELLITE_SIZE, height: SATELLITE_SIZE, justifyContent: 'center', alignItems: 'center' },
   satelliteBtnBase: { width: SATELLITE_SIZE, height: SATELLITE_SIZE, borderRadius: SATELLITE_SIZE / 2, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 5 },
@@ -466,28 +405,34 @@ const styles = StyleSheet.create({
   satelliteSelected: { backgroundColor: '#007AFF', borderWidth: 1, borderColor: '#0056b3' },
   satelliteStop: { backgroundColor: '#FFF', borderWidth: 2, borderColor: '#E53E3E' },
   satelliteAdd: { backgroundColor: '#F0F9FF', borderColor: '#BEE3F8' },
-  satelliteText: { fontSize: 11, fontWeight: '600', color: '#4A5568' }, 
+  satelliteLocked: { backgroundColor: '#F7FAFC', borderColor: '#E2E8F0', opacity: 0.7 },
+  satelliteText: { fontSize: 11, fontWeight: '600', color: '#4A5568' },
   stopIconWrapper: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
   stopSquare: { width: 14, height: 14, borderRadius: 2, backgroundColor: '#E53E3E' },
   lockIcon: { position: 'absolute', top: -3, right: -3, backgroundColor: '#2D3748', borderRadius: 5, padding: 1 },
-  addFormContainer: { position: 'absolute', bottom: 0, left: 0, backgroundColor: '#FFF', borderRadius: 20, padding: 16, width: 180, alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 10, zIndex: 1002 },
-  addFormTitle: { fontSize: 12, fontWeight: 'bold', color: '#718096', marginBottom: 8, textTransform: 'uppercase' },
-  inputsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  timeInput: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#F7FAFC', borderWidth: 1, borderColor: '#E2E8F0', textAlign: 'center', fontSize: 16, fontWeight: 'bold', color: '#2D3748' },
-  timeSep: { fontSize: 14, color: '#A0AEC0', marginHorizontal: 4 },
-  formActions: { flexDirection: 'row', gap: 12 },
-  formBtnCancel: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFF5F5', justifyContent: 'center', alignItems: 'center' },
-  formBtnConfirm: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#38A169', justifyContent: 'center', alignItems: 'center' },
-  alertOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'flex-end', zIndex: 9999, paddingHorizontal: 20 },
-  alertCard: { width: '100%', backgroundColor: '#D97706', borderRadius: 20, padding: 24, alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 10, marginBottom: 20 },
-  alertHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  alertTitle: { fontSize: 20, fontWeight: '900', color: '#FFF', letterSpacing: 0.5 },
-  overtimeText: { fontSize: 32, fontWeight: 'bold', color: '#FFF', marginBottom: 20, fontVariant: ['tabular-nums'] },
-  alertButton: { backgroundColor: '#FFF', width: '100%', paddingVertical: 16, borderRadius: 12, alignItems: 'center' },
-  alertButtonText: { color: '#D97706', fontSize: 18, fontWeight: 'bold' },
-  satelliteLocked: {
-    backgroundColor: '#F7FAFC',
-    borderColor: '#E2E8F0',
-    opacity: 0.7,
-  },
+
+  // --- OVERTIME STYLES ---
+  overtimeOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', zIndex: 2000, padding: 20 },
+  overtimeCard: { width: '90%', backgroundColor: '#FFF', borderRadius: 24, padding: 24, alignItems: 'center', elevation: 10, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 10 },
+  overtimeHeader: { flexDirection: 'row', width: '100%', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  overtimeTitle: { fontSize: 18, fontWeight: '800', color: '#E53E3E', textTransform: 'uppercase' },
+  minimizeBtn: { padding: 8, backgroundColor: '#EDF2F7', borderRadius: 20 },
+  overtimeBody: { marginBottom: 24 },
+  overtimeTime: { fontSize: 56, fontWeight: '900', color: '#2D3748', fontVariant: ['tabular-nums'] },
+  overtimeActionBtn: { backgroundColor: '#E53E3E', width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 16, gap: 8, shadowColor: '#E53E3E', shadowOpacity: 0.4, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
+  overtimeActionText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+
+  // --- MODAL WHEEL STYLES ---
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: width * 0.8, backgroundColor: '#FFF', borderRadius: 24, padding: 20, alignItems: 'center', elevation: 10 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#2D3748', marginBottom: 20 },
+  wheelContainer: { height: ITEM_HEIGHT * 3, width: '100%', overflow: 'hidden', marginBottom: 24 },
+  wheelHighlight: { position: 'absolute', top: ITEM_HEIGHT, left: 0, right: 0, height: ITEM_HEIGHT, backgroundColor: '#F0F9FF', borderRadius: 10, borderColor: '#007AFF', borderWidth: 1 },
+  pickerItem: { justifyContent: 'center', alignItems: 'center' },
+  pickerText: { fontSize: 20, color: '#A0AEC0', fontWeight: '500' },
+  pickerTextSelected: { fontSize: 24, color: '#007AFF', fontWeight: '800' },
+  modalActions: { flexDirection: 'row', gap: 16, width: '100%' },
+  modalBtnCancel: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#EDF2F7', justifyContent: 'center', alignItems: 'center' },
+  modalBtnStart: { flex: 1, height: 50, borderRadius: 25, backgroundColor: '#007AFF', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
+  btnStartText: { color: '#FFF', fontWeight: '800', fontSize: 16 },
 });

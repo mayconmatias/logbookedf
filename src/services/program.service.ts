@@ -91,3 +91,34 @@ export const deleteProgram = async (programId: string) => {
     .eq('id', programId);
   if (error) throw error;
 };
+
+/**
+ * [NOVO] Busca os templates que pertencem ao Coach logado.
+ * Isso inclui templates criados por ele E templates comprados na loja.
+ */
+export const fetchCoachTemplates = async (): Promise<Program[]> => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Usuário não logado.');
+
+  const { data, error } = await supabase
+    .from('programs')
+    .select('*')
+    .eq('coach_id', user.id)
+    .eq('is_template', true)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+};
+
+/**
+ * [NOVO] Aplica um template a um aluno (Cria uma cópia do programa para ele).
+ */
+export const assignTemplateToStudent = async (templateId: string, studentId: string) => {
+  const { error } = await supabase.rpc('assign_template_to_student', {
+    p_template_id: templateId,
+    p_student_id: studentId
+  });
+
+  if (error) throw new Error(error.message);
+};

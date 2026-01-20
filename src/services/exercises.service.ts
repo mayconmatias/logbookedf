@@ -29,7 +29,6 @@ export const createExerciseDefinition = async (name: string) => {
     throw new Error(error.message); 
   }
 
-  // Lógica de IA/Cache Global
   const { data: globalData } = await supabase.rpc('find_global_tags_for_name', { p_name: name.trim() });
   const existingInfo = (globalData && globalData.length > 0) ? globalData[0] : null;
 
@@ -72,7 +71,105 @@ export const updateExerciseInstructions = async (definitionId: string, defaultNo
 };
 
 // ============================================================
-// 2. GERENCIAMENTO DE WORKOUTS E SÉRIES
+// 2. FUNÇÃO DE SUBSTITUIÇÃO (COM CORREÇÃO DE ORDEM)
+// ============================================================
+
+export const substituteExerciseInWorkout = async (
+  workoutId: string,
+  originalExerciseId: string,
+  newDefinitionId: string
+) => {
+  // 1. Busca dados do exercício original para saber a posição (ordem)
+  const { data: originalExercise, error: fetchError } = await supabase
+    .from('exercises')
+    .select('order_in_workout, notes, video_url, is_unilateral, sets(*)')
+    .eq('id', originalExerciseId)
+    .single();
+
+  if (fetchError || !originalExercise) throw new Error("Exercício original não encontrado.");
+
+  const currentOrder = originalExercise.order_in_workout;
+  const newTargetOrder = currentOrder + 1;
+
+  // 2. Empurra exercícios subsequentes para baixo para abrir espaço
+  const { data: exercisesToShift } = await supabase
+    .from('exercises')
+    .select('id, order_in_workout')
+    .eq('workout_id', workoutId)
+    .gte('order_in_workout', newTargetOrder)
+    .order('order_in_workout', { ascending: false });
+
+  if (exercisesToShift && exercisesToShift.length > 0) {
+    for (const ex of exercisesToShift) {
+      await supabase
+        .from('exercises')
+        .update({ order_in_workout: ex.order_in_workout + 1 })
+        .eq('id', ex.id);
+    }
+  }
+
+  // 3. Verifica se o novo exercício é unilateral (baseado na definição)
+  const { data: newDef } = await supabase
+    .from('exercise_definitions')
+    .select('is_unilateral, name')
+    .eq('id', newDefinitionId)
+    .single();
+    
+  const isNewUnilateral = newDef?.is_unilateral || 
+                          (newDef?.name?.toLowerCase().includes('unilateral')) || 
+                          false;
+
+  // 4. Cria a instância do NOVO exercício na posição correta (logo abaixo do original)
+  const { data: newExercise, error: createError } = await supabase
+    .from('exercises')
+    .insert({
+      workout_id: workoutId,
+      definition_id: newDefinitionId,
+      order_in_workout: newTargetOrder,
+      notes: originalExercise.notes, // Copia notas do original
+      is_unilateral: isNewUnilateral,
+      is_substitution: true,
+      original_exercise_id: originalExerciseId
+    })
+    .select('id')
+    .single();
+
+  if (createError) throw new Error(createError.message);
+
+  // 5. Copia e Migra as Séries
+  if (originalExercise.sets && originalExercise.sets.length > 0) {
+    // Ordena para garantir integridade sequencial
+    const sortedSets = originalExercise.sets.sort((a: any, b: any) => a.set_number - b.set_number);
+    
+    const setsToClone = sortedSets.map((s: any) => ({
+      exercise_id: newExercise.id,
+      set_number: s.set_number,
+      weight: s.weight, // Mantém carga planejada
+      reps: s.reps,     // Mantém reps planejadas
+      rpe: s.rpe,
+      set_type: s.set_type,
+      observations: s.observations,
+      // Ajusta lado se a unilateralidade mudou
+      side: isNewUnilateral ? (s.side || 'D') : null 
+    }));
+
+    const { error: setsError } = await supabase.from('sets').insert(setsToClone);
+    if (setsError) throw new Error("Erro ao copiar séries.");
+  }
+
+  // 6. Marca o exercício ANTIGO como substituído
+  const { error: updateError } = await supabase
+    .from('exercises')
+    .update({ substituted_by_id: newExercise.id })
+    .eq('id', originalExerciseId);
+
+  if (updateError) throw new Error("Erro ao vincular substituição.");
+
+  return newExercise.id;
+};
+
+// ============================================================
+// 3. GERENCIAMENTO DE WORKOUTS E SÉRIES
 // ============================================================
 
 export const getOrCreateExerciseInWorkout = async (workoutId: string, definitionId: string): Promise<string> => {
@@ -87,7 +184,6 @@ export const fetchExerciseSetHistory = async (definitionId: string): Promise<Exe
   return data || [];
 };
 
-// [CORREÇÃO AQUI]: Tipagem e chamada correta para a RPC de 3 argumentos
 export const fetchPerformancePeek = async (
   definitionId: string, 
   sessionWorkoutId?: string,
@@ -103,20 +199,25 @@ export const fetchPerformancePeek = async (
   return data as PerformancePeekData;
 };
 
+// [ATUALIZADO] Reordenação que respeita Aquecimento no Topo
 const reorderSetsInternal = async (exerciseId: string) => {
   const { data: sets, error } = await supabase
     .from('sets')
     .select('id, set_type, performed_at, created_at') 
     .eq('exercise_id', exerciseId)
-    .is('parent_set_id', null);
+    .is('parent_set_id', null); // Ignora sub-sets de drop
 
   if (error || !sets) return;
 
   const sorted = sets.sort((a, b) => {
+    // Regra 1: Warmup sempre antes de qualquer outro tipo
     const aIsWarmup = a.set_type === 'warmup';
     const bIsWarmup = b.set_type === 'warmup';
+    
     if (aIsWarmup && !bIsWarmup) return -1;
     if (!aIsWarmup && bIsWarmup) return 1;
+
+    // Regra 2: Desempate por data de criação (Cronológico)
     const dateA = new Date(a.performed_at || a.created_at).getTime();
     const dateB = new Date(b.performed_at || b.created_at).getTime();
     return dateA - dateB;
@@ -130,7 +231,7 @@ export interface SubSetPayload { weight: number; reps: number; }
 
 interface SaveSetParams {
   exercise_id: string; set_number: number; weight: number; reps: number; rpe?: number;
-  observations?: string; side?: 'E' | 'D'; set_type: SetType; subSets?: SubSetPayload[]; 
+  observations?: string; side?: 'E' | 'D' | null; set_type: SetType; subSets?: SubSetPayload[]; 
 }
 
 export const saveComplexSet = async (params: SaveSetParams): Promise<WorkoutSet> => {
@@ -138,7 +239,7 @@ export const saveComplexSet = async (params: SaveSetParams): Promise<WorkoutSet>
     .from('sets')
     .insert({
       exercise_id: params.exercise_id,
-      set_number: params.set_type === 'warmup' ? 0 : 999,
+      set_number: params.set_type === 'warmup' ? 0 : 999, // Placeholder, será corrigido no reorder
       weight: params.weight,
       reps: params.reps,
       rpe: params.rpe,
@@ -175,7 +276,8 @@ export const saveSuperSet = async (items: any[], setType: SetType) => {
     weight: item.weight,
     reps: item.reps,
     set_type: setType,
-    super_set_id: superSetId 
+    super_set_id: superSetId,
+    side: item.side 
   }));
 
   const { data, error } = await supabase.from('sets').insert(setsToInsert).select();
@@ -216,7 +318,7 @@ export const reorderWorkoutExercises = async (updates: { id: string; order: numb
 };
 
 // ============================================================
-// 3. LOGICA DE TEMPLATES (INSTANCIAÇÃO) -- CORRIGIDA
+// 4. LÓGICA DE TEMPLATES (INSTANCIAÇÃO INTELIGENTE)
 // ============================================================
 
 export const instantiateTemplateInWorkout = async (
@@ -225,48 +327,50 @@ export const instantiateTemplateInWorkout = async (
 ) => {
   if (!plannedExercises || plannedExercises.length === 0) return;
 
-  // 1. Prepara o Payload de Exercícios respeitando a ordem do Array
-  const exercisesPayload = plannedExercises.map((plan, index) => ({
-    workout_id: workoutId,
-    definition_id: plan.definition_id,
-    order_in_workout: index // Garante a ordem visual
-  }));
-
-  // 2. Inserção em LOTE (Bulk Insert) e retorna os dados criados
-  const { data: createdExercises, error: exError } = await supabase
-    .from('exercises')
-    .insert(exercisesPayload)
-    .select('id, definition_id'); // Precisamos dos IDs gerados
-
-  if (exError) throw new Error('Erro ao criar exercícios do template: ' + exError.message);
-  if (!createdExercises || createdExercises.length === 0) return;
-
-  // 3. Criação dos Sets em LOTE
   const setsPayload: any[] = [];
 
-  // Mapeia os exercícios criados de volta para o planejamento original
-  // Nota: Isso assume que o banco retorna na mesma ordem ou usamos definition_id para match
-  // Para segurança total, iteramos sobre o que foi criado.
-  createdExercises.forEach(exInstance => {
-    // Encontra o plano correspondente (pode haver duplicatas de definition_id num treino, 
-    // mas num template simples assumimos match pelo ID ou ordem. 
-    // Aqui usamos uma lógica simples: encontrar o primeiro plan que bate o ID)
-    const plan = plannedExercises.find(p => p.definition_id === exInstance.definition_id);
+  for (let index = 0; index < plannedExercises.length; index++) {
+    const plan = plannedExercises[index];
     
-    if (plan) {
-      const count = plan.sets_count || 3;
+    // Detecção de Unilateralidade
+    const lowerName = plan.definition_name?.toLowerCase() || '';
+    const isUnilateral = plan.is_unilateral 
+      || lowerName.includes('unilateral') 
+      || lowerName.includes('uni ');
+
+    // 1. Cria a instância do exercício (COPIANDO NOTES E VIDEO)
+    const { data: exInstance, error: exError } = await supabase
+      .from('exercises')
+      .insert({
+        workout_id: workoutId,
+        definition_id: plan.definition_id,
+        order_in_workout: index,
+        notes: plan.notes || null,         
+        video_url: plan.video_url || null, 
+        is_unilateral: isUnilateral
+      })
+      .select('id')
+      .single();
+
+    if (exError) {
+      console.error('Erro ao instanciar exercício:', exError);
+      continue; 
+    }
+
+    const count = plan.sets_count || 3;
+    const rpeValue = plan.rpe_target ? parseFloat(plan.rpe_target) : null;
+
+    if (isUnilateral) {
       for (let i = 1; i <= count; i++) {
-        setsPayload.push({
-          exercise_id: exInstance.id,
-          set_number: i,
-          weight: 0,
-          reps: 0,
-          rpe: plan.rpe_target ? parseFloat(plan.rpe_target) : null,
-          set_type: 'normal'
-        });
+        setsPayload.push({ exercise_id: exInstance.id, set_number: i, weight: 0, reps: 0, rpe: rpeValue, set_type: 'normal', side: 'D' });
+        setsPayload.push({ exercise_id: exInstance.id, set_number: i, weight: 0, reps: 0, rpe: rpeValue, set_type: 'normal', side: 'E' });
+      }
+    } else {
+      for (let i = 1; i <= count; i++) {
+        setsPayload.push({ exercise_id: exInstance.id, set_number: i, weight: 0, reps: 0, rpe: rpeValue, set_type: 'normal', side: null });
       }
     }
-  });
+  }
 
   if (setsPayload.length > 0) {
     const { error: setsError } = await supabase.from('sets').insert(setsPayload);
@@ -275,7 +379,7 @@ export const instantiateTemplateInWorkout = async (
 };
 
 // ============================================================
-// 4. IA E CLASSIFICAÇÃO
+// 5. IA E CLASSIFICAÇÃO
 // ============================================================
 
 export interface ExerciseClassification {

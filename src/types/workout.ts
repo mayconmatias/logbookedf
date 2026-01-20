@@ -9,16 +9,13 @@ export interface WorkoutSet {
   rpe?: number;
   observations?: string;
   performed_at?: string;
-  side?: 'E' | 'D';
-  
-  // Novos campos
+  side?: 'E' | 'D' | null;
+
   set_type: SetType;
-  parent_set_id?: string | null; // Se for filho de um Drop/Cluster
+  parent_set_id?: string | null;
   
-  // Front-end only (para renderização aninhada)
   subSets?: WorkoutSet[]; 
-  
-  sessionWorkoutId?: string; // Mantido do seu código anterior
+  sessionWorkoutId?: string;
 }
 
 export interface WorkoutExercise {
@@ -26,9 +23,18 @@ export interface WorkoutExercise {
   definition_id: string;
   name: string;
   sets: WorkoutSet[];
+  order_in_workout: number;
+  is_unilateral: boolean;
+  
+  // [NOVO] Campos específicos da sessão (vindos do programa)
+  notes?: string;
+  video_url?: string;
+
+  substituted_by_id?: string | null;
+  is_substitution?: boolean;
+  original_exercise_id?: string | null;
 }
 
-// ... restante dos tipos (WorkoutHistoryItem, etc) mantidos
 export interface WorkoutHistoryItem {
   id: string;
   workout_date: string;
