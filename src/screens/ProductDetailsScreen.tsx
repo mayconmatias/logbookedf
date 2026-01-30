@@ -6,8 +6,11 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as WebBrowser from 'expo-web-browser'; // [NOVO]
+
 import { RootStackParamList } from '@/types/navigation';
-import { purchaseProduct } from '@/services/marketplace.service';
+import { purchaseWithSplit } from '@/services/asaas.service'; // [ATUALIZADO]
+import { supabase } from '@/lib/supabaseClient';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProductDetails'>;
 const { width } = Dimensions.get('window');
@@ -19,19 +22,29 @@ export default function ProductDetailsScreen({ navigation, route }: Props) {
   const handleBuy = async () => {
     setBuying(true);
     try {
-      const result = await purchaseProduct(product.id);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Usuário não logado.");
+
+      // 1. Gera o link de pagamento no Asaas (Backend cria a cobrança com Split)
+      const { paymentUrl } = await purchaseWithSplit(product.id);
       
-      Alert.alert('Sucesso!', 'Item adicionado à sua biblioteca.', [
-        {
-          text: 'Ver Agora',
-          onPress: () => {
-            if (result.type === 'program') navigation.navigate('MyPrograms');
-            else navigation.navigate('ExerciseCatalog'); // Ou para a tela de bibliotecas se houver
-          }
-        }
-      ]);
+      if (!paymentUrl) throw new Error("Link de pagamento não gerado.");
+
+      // 2. Abre o navegador in-app para o usuário pagar (Pix/Cartão)
+      const result = await WebBrowser.openBrowserAsync(paymentUrl);
+
+      // 3. Feedback ao retornar
+      // O webhook do Asaas atualizará o banco 'user_purchases' em background.
+      if (result.type === 'cancel' || result.type === 'dismiss') {
+         Alert.alert(
+            'Pagamento em Processamento', 
+            'Se você concluiu o pagamento, aguarde alguns instantes para que o item apareça na sua biblioteca.',
+            [{ text: 'OK', onPress: () => navigation.goBack() }]
+         );
+      }
+
     } catch (e: any) {
-      Alert.alert('Erro', e.message);
+      Alert.alert('Erro no Pagamento', e.message || 'Falha ao iniciar checkout.');
     } finally {
       setBuying(false);
     }
@@ -67,7 +80,7 @@ export default function ProductDetailsScreen({ navigation, route }: Props) {
               <Text style={styles.title}>{product.title}</Text>
             </View>
             <Text style={styles.price}>
-              {product.price > 0 ? `R$ ${product.price}` : 'GRÁTIS'}
+              {product.price > 0 ? `R$ ${product.price.toFixed(2)}` : 'GRÁTIS'}
             </Text>
           </View>
 
@@ -101,7 +114,7 @@ export default function ProductDetailsScreen({ navigation, route }: Props) {
             {product.description || "Sem descrição disponível."}
           </Text>
 
-          {/* Preview / Benefícios (Hardcoded pra demo, pode vir do banco) */}
+          {/* Preview / Benefícios */}
           <View style={styles.benefitBox}>
             <Text style={styles.benefitTitle}>O que está incluso?</Text>
             <View style={styles.benefitRow}><Feather name="check" size={16} color="#38A169" /><Text style={styles.benefitText}>Acesso vitalício ao conteúdo</Text></View>
@@ -127,8 +140,8 @@ export default function ProductDetailsScreen({ navigation, route }: Props) {
             <Text style={styles.buyText}>JÁ ADQUIRIDO</Text>
           ) : (
             <>
-              <Text style={styles.buyText}>OBTER AGORA</Text>
-              <Feather name="arrow-right" size={20} color="#FFF" />
+              <Text style={styles.buyText}>COMPRAR AGORA</Text>
+              <Feather name="shopping-cart" size={20} color="#FFF" />
             </>
           )}
         </TouchableOpacity>

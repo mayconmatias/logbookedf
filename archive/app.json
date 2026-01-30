@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "Logbook EdF",
+    "slug": "logbookedf",
+    "scheme": "logbookedf",
+    "version": "1.0.3",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "updates": {
+      "enabled": true,
+      "url": "https://u.expo.dev/c69323ab-c81d-444e-821a-4dad327e89f8",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": "1.0.3",
+    "ios": {
+      "bundleIdentifier": "com.mayconmatias.logbookedf",
+      "buildNumber": "10",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.mayconmatias.logbookedf",
+      "versionCode": 10,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
+      ]
+    },
+    "plugins": [
+      "expo-font",
+      "expo-asset",
+      "expo-local-authentication",
+      "expo-router",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "c69323ab-c81d-444e-821a-4dad327e89f8"
+      }
+    }
+  }
+}

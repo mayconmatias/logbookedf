@@ -104,14 +104,14 @@ const LastSessionRecap = ({ sets }: { sets: ExerciseAnalyticsDataV2['last_sessio
 
   return (
     <View style={styles.lastSessionContainer}>
-      <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8}}>
-         <Feather name="rotate-ccw" size={16} color="#718096" />
-         <Text style={styles.sectionTitle}>Sessão Anterior</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+        <Feather name="rotate-ccw" size={16} color="#718096" />
+        <Text style={styles.sectionTitle}>Sessão Anterior</Text>
       </View>
-      {sets.map((set, i) => (
+      {sets.map((set, i: number) => (
         <View key={i} style={styles.setRow}>
           <View style={styles.setBadge}><Text style={styles.setIndexText}>#{set.set_number}</Text></View>
-          <Text style={styles.setMainText}>{set.weight}kg <Text style={{color:'#CBD5E0'}}>x</Text> {set.reps}</Text>
+          <Text style={styles.setMainText}>{set.weight}kg <Text style={{ color: '#CBD5E0' }}>x</Text> {set.reps}</Text>
           {set.rpe && <View style={styles.rpeBadge}><Text style={styles.rpeText}>@{set.rpe}</Text></View>}
         </View>
       ))}
@@ -197,7 +197,7 @@ export const ExerciseAnalyticsSheet = forwardRef<ExerciseAnalyticsSheetRef, {}>(
 
     return (
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        
+
         {/* 1. PROGRESSÃO & STATUS */}
         <View style={styles.cardsRow}>
           <ProgressionCard data={data.last_progression} />
@@ -206,26 +206,26 @@ export const ExerciseAnalyticsSheet = forwardRef<ExerciseAnalyticsSheetRef, {}>(
 
         {/* 2. RECAP SESSÃO ANTERIOR (RESTAURADO) */}
         {data.last_session_sets && data.last_session_sets.length > 0 && (
-           <LastSessionRecap sets={data.last_session_sets} />
+          <LastSessionRecap sets={data.last_session_sets} />
         )}
 
         {/* 3. ESTATÍSTICAS TÉCNICAS */}
         <View style={styles.statsGrid}>
-          <InfoRow 
-            icon="clock" 
-            label="Duração Média" 
-            value={data.avg_duration_min > 0 ? `${data.avg_duration_min} min` : '--'} 
+          <InfoRow
+            icon="clock"
+            label="Duração Média"
+            value={data.avg_duration_min > 0 ? `${data.avg_duration_min} min` : '--'}
           />
-          <InfoRow 
-            icon="watch" 
-            label="Descanso Médio" 
-            value={data.avg_rest_sec > 0 ? `${data.avg_rest_sec} seg` : '--'} 
+          <InfoRow
+            icon="watch"
+            label="Descanso Médio"
+            value={data.avg_rest_sec > 0 ? `${data.avg_rest_sec} seg` : '--'}
           />
           {data.favorite_set_type && (
-            <InfoRow 
-              icon="layers" 
-              label="Tipo Favorito" 
-              value={data.favorite_set_type === 'normal' ? 'Séries Normais' : data.favorite_set_type.toUpperCase()} 
+            <InfoRow
+              icon="layers"
+              label="Tipo Favorito"
+              value={data.favorite_set_type === 'normal' ? 'Séries Normais' : data.favorite_set_type.toUpperCase()}
             />
           )}
         </View>
@@ -235,7 +235,7 @@ export const ExerciseAnalyticsSheet = forwardRef<ExerciseAnalyticsSheetRef, {}>(
           <Text style={styles.sectionTitle}>Força (e1RM)</Text>
           <Text style={styles.sectionSub}>Estimativa de 1 Repetição Máxima.</Text>
           <View style={styles.chartContainer}>
-             <SimpleLineChart data={data.chart_e1rm} color="#3182CE" yKey="avg" />
+            <SimpleLineChart data={data.chart_e1rm} color="#3182CE" yKey="avg" />
           </View>
         </View>
 
@@ -245,7 +245,7 @@ export const ExerciseAnalyticsSheet = forwardRef<ExerciseAnalyticsSheetRef, {}>(
             <Text style={styles.sectionTitle}>Volume de Carga</Text>
             <Text style={styles.sectionSub}>Peso Total x Repetições (kg).</Text>
             <View style={styles.chartContainer}>
-               <SimpleLineChart data={data.chart_volume} color="#805AD5" yKey="vol_load" />
+              <SimpleLineChart data={data.chart_volume} color="#805AD5" yKey="vol_load" />
             </View>
           </View>
         )}
@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   headerTitle: { fontSize: 20, fontWeight: '800', color: '#1A202C', flex: 1 },
   errorText: { textAlign: 'center', marginTop: 40, color: '#A0AEC0' },
-  
+
   cardsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24 },
   statusCard: { width: CARD_WIDTH, padding: 16, borderRadius: 16, borderWidth: 1, minHeight: 140, justifyContent: 'space-between' },
   cardIconRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },

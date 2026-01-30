@@ -18,11 +18,22 @@ export default {
     
     ios: {
       supportsTablet: false,
-      bundleIdentifier: "com.mayconmatias.logbookedf", 
-      buildNumber: "11", 
+      bundleIdentifier: "com.mayconmatias.logbookedf",
+      buildNumber: "11",
+      usesAppleSignIn: true,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
-        UIBackgroundModes: ["remote-notification"] // Necessário para notificações avançadas
+        UIBackgroundModes: ["remote-notification"],
+        // Configuração para Login do Google
+        CFBundleURLTypes: [
+          {
+            CFBundleURLSchemes: [
+              "com.googleusercontent.apps.541381977382-fj4itntgeofla5l7h31saqb7bq4lsdru"
+            ]
+          }
+        ],
+        NSPhotoLibraryAddUsageDescription: "O app precisa salvar imagens dos seus treinos para você compartilhar no Instagram/TikTok.",
+        NSPhotoLibraryUsageDescription: "O app precisa acessar a galeria para salvar os stickers de treino."
       }
     },
     
@@ -36,8 +47,10 @@ export default {
       permissions: [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
-        "android.permission.FOREGROUND_SERVICE", // Para o Timer na tela bloqueada
-        "android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE"
       ]
     },
 
@@ -69,9 +82,18 @@ export default {
     plugins: [
       "expo-font",
       "expo-asset",
+      "expo-web-browser", // [ADICIONADO AQUI]
       "expo-local-authentication",
       "expo-router",
-      "expo-localization", // i18n
+      "expo-localization",
+      "expo-apple-authentication",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "O app precisa salvar imagens dos seus treinos para você compartilhar.",
+          "savePhotosPermission": "O app precisa salvar imagens dos seus treinos para você compartilhar."
+        }
+      ],
       [
         "expo-build-properties",
         {
@@ -79,7 +101,6 @@ export default {
             extraMavenRepos: [
               "../../node_modules/@notifee/react-native/android/libs"
             ],
-            // Aumenta compatibilidade do Kotlin para libs modernas
           },
           ios: {
             useFrameworks: "static"

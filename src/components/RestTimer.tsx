@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
   Dimensions,
   Modal,
   FlatList,
@@ -13,14 +13,14 @@ import { Feather } from '@expo/vector-icons';
 import { useTimer } from '@/context/TimerContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { triggerHaptic } from '@/utils/haptics';
-import { navigate } from '@/utils/navigationRef'; 
+import { navigate } from '@/utils/navigationRef';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { 
-  useSharedValue, 
-  useAnimatedStyle, 
-  withSpring, 
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
   withDelay,
   withTiming,
   interpolate
@@ -30,20 +30,20 @@ const { width, height } = Dimensions.get('window');
 
 const FAB_SIZE = 60;
 const SATELLITE_SIZE = 44;
-const RADIUS = 110; 
+const RADIUS = 110;
 const MARGIN = 20;
 const SESSION_KEY = '@sessionWorkoutId';
 
 // Configuração Wheel Picker
-const ITEM_HEIGHT = 50; 
+const ITEM_HEIGHT = 50;
 const TIME_OPTIONS = Array.from({ length: 20 }, (_, i) => (i + 1) * 15);
 
 // --- COMPONENTE SATÉLITE ---
-const SatelliteButton = ({ 
-  index, totalItems, isOpen, onPress, onLongPress, children, isLocked, style 
+const SatelliteButton = ({
+  index, totalItems, isOpen, onPress, onLongPress, children, isLocked, style
 }: any) => {
-  const startAngle = -90; 
-  const angleSpan = 100; 
+  const startAngle = -90;
+  const angleSpan = 100;
   const step = totalItems > 1 ? angleSpan / (totalItems - 1) : 0;
   const angleDeg = startAngle + (index * step);
   const angleRad = angleDeg * (Math.PI / 180);
@@ -72,13 +72,13 @@ const SatelliteButton = ({
 
   return (
     <Animated.View style={[styles.satelliteContainer, animatedStyle]}>
-      <TouchableOpacity 
-        style={[styles.satelliteBtnBase, style, isLocked && styles.satelliteLocked]} 
+      <TouchableOpacity
+        style={[styles.satelliteBtnBase, style, isLocked && styles.satelliteLocked]}
         onPress={onPress}
-        onLongPress={isLocked ? undefined : onLongPress} 
+        onLongPress={isLocked ? undefined : onLongPress}
         delayLongPress={300}
         activeOpacity={0.8}
-        disabled={isLocked} 
+        disabled={isLocked}
       >
         {children}
       </TouchableOpacity>
@@ -87,14 +87,14 @@ const SatelliteButton = ({
 };
 
 export default function RestTimer() {
-  const { 
-    secondsRemaining, isActive, isOvertime, stopTimer, startTimer, 
-    presets, activePresetIndex, selectPreset, updatePresets, isPro 
+  const {
+    secondsRemaining, isActive, isOvertime, stopTimer, startTimer,
+    presets, activePresetIndex, selectPreset, updatePresets, isPro
   } = useTimer();
-  
+
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isWheelModalVisible, setIsWheelModalVisible] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false); 
+  const [isMinimized, setIsMinimized] = useState(false);
   const [selectedCustomTime, setSelectedCustomTime] = useState(60);
 
   const insets = useSafeAreaInsets();
@@ -117,7 +117,7 @@ export default function RestTimer() {
     .onEnd(() => {
       if (x.value < width / 2) x.value = withSpring(MARGIN);
       else x.value = withSpring(width - FAB_SIZE - MARGIN);
-      
+
       const minY = insets.top + MARGIN;
       const maxY = height - insets.bottom - FAB_SIZE - MARGIN;
       if (y.value < minY) y.value = withSpring(minY);
@@ -156,13 +156,13 @@ export default function RestTimer() {
   const handleStartCustom = () => {
     const newPresets = [...presets];
     if (!newPresets.includes(selectedCustomTime)) {
-        newPresets.push(selectedCustomTime);
-        newPresets.sort((a, b) => a - b);
-        updatePresets(newPresets);
+      newPresets.push(selectedCustomTime);
+      newPresets.sort((a, b) => a - b);
+      updatePresets(newPresets);
     }
     const newIndex = newPresets.indexOf(selectedCustomTime);
     if (newIndex !== -1) selectPreset(newIndex);
-    
+
     startTimer(selectedCustomTime);
     setIsWheelModalVisible(false);
     setIsMenuOpen(false);
@@ -171,7 +171,7 @@ export default function RestTimer() {
   const handleOpenWheelPicker = () => {
     if (!isPro) {
       setIsMenuOpen(false);
-      navigate('CoachPaywall'); 
+      navigate('CoachPaywall');
       return;
     }
     setIsMenuOpen(false);
@@ -181,7 +181,7 @@ export default function RestTimer() {
   // [NOVO] Função para Deletar Preset
   const handleDeletePreset = (secsToDelete: number) => {
     if (!isPro) return; // Segurança extra
-    
+
     if (presets.length <= 1) {
       Alert.alert('Erro', 'Você deve manter pelo menos um tempo de descanso.');
       return;
@@ -192,8 +192,8 @@ export default function RestTimer() {
       `Deseja apagar o timer de ${formatLabel(secsToDelete)}?`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Apagar', 
+        {
+          text: 'Apagar',
           style: 'destructive',
           onPress: () => {
             const newPresets = presets.filter(p => p !== secsToDelete);
@@ -236,8 +236,8 @@ export default function RestTimer() {
           {isLocked && <Feather name="lock" size={8} color="#A0AEC0" style={styles.lockIcon} />}
         </>
       ),
-      onPress: () => { 
-        if (!isLocked) { selectPreset(idx); setIsMenuOpen(false); } 
+      onPress: () => {
+        if (!isLocked) { selectPreset(idx); setIsMenuOpen(false); }
         else triggerHaptic('error');
       },
       // [NOVO] Adicionado evento de Long Press
@@ -273,12 +273,12 @@ export default function RestTimer() {
                 totalItems={menuItems.length}
                 isOpen={isMenuOpen}
                 onPress={item.onPress}
-                onLongPress={item.onLongPress} // [NOVO] Passando a prop
+                onLongPress={'onLongPress' in item ? item.onLongPress : undefined} // [NOVO] Passando a prop
                 isLocked={item.isLocked}
                 style={[
                   styles.satelliteBtnBase,
-                  item.isStop ? styles.satelliteStop : (item.isSelected ? styles.satelliteSelected : styles.satelliteNormal),
-                  item.isAdd && styles.satelliteAdd,
+                  item.isStop ? styles.satelliteStop : ('isSelected' in item && item.isSelected ? styles.satelliteSelected : styles.satelliteNormal),
+                  ('isAdd' in item && item.isAdd) && styles.satelliteAdd,
                   item.isLocked && styles.satelliteLocked
                 ]}
               >
@@ -287,12 +287,12 @@ export default function RestTimer() {
             ))}
           </View>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
-              styles.fab, 
+              styles.fab,
               isActive ? styles.fabActive : styles.fabIdle,
               isOvertime && styles.fabOvertime,
-            ]} 
+            ]}
             onPress={handleMainTap}
             onLongPress={() => { triggerHaptic('medium'); setIsMenuOpen(true); }}
             delayLongPress={300}
@@ -310,78 +310,78 @@ export default function RestTimer() {
       {/* --- MODAL DE OVERTIME (Estilo Card Branco, Não Tela Vermelha) --- */}
       {isOvertime && !isMinimized && (
         <View style={styles.overtimeOverlay}>
-           <View style={styles.overtimeCard}>
-              
-              {/* Header com Minimizar */}
-              <View style={styles.overtimeHeader}>
-                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
-                    <Feather name="bell" size={20} color="#E53E3E" />
-                    <Text style={styles.overtimeTitle}>Descanso Finalizado</Text>
-                 </View>
-                 <TouchableOpacity onPress={() => setIsMinimized(true)} style={styles.minimizeBtn}>
-                    <Feather name="minimize-2" size={20} color="#718096" />
-                 </TouchableOpacity>
-              </View>
+          <View style={styles.overtimeCard}>
 
-              {/* Tempo Gigante */}
-              <View style={styles.overtimeBody}>
-                 <Text style={styles.overtimeTime}>{formatTime(secondsRemaining)}</Text>
+            {/* Header com Minimizar */}
+            <View style={styles.overtimeHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Feather name="bell" size={20} color="#E53E3E" />
+                <Text style={styles.overtimeTitle}>Descanso Finalizado</Text>
               </View>
-
-              {/* Ação Principal */}
-              <TouchableOpacity style={styles.overtimeActionBtn} onPress={handleNextSet}>
-                 <Text style={styles.overtimeActionText}>PRÓXIMA SÉRIE</Text>
-                 <Feather name="arrow-right" size={20} color="#FFF" />
+              <TouchableOpacity onPress={() => setIsMinimized(true)} style={styles.minimizeBtn}>
+                <Feather name="minimize-2" size={20} color="#718096" />
               </TouchableOpacity>
+            </View>
 
-           </View>
+            {/* Tempo Gigante */}
+            <View style={styles.overtimeBody}>
+              <Text style={styles.overtimeTime}>{formatTime(secondsRemaining)}</Text>
+            </View>
+
+            {/* Ação Principal */}
+            <TouchableOpacity style={styles.overtimeActionBtn} onPress={handleNextSet}>
+              <Text style={styles.overtimeActionText}>PRÓXIMA SÉRIE</Text>
+              <Feather name="arrow-right" size={20} color="#FFF" />
+            </TouchableOpacity>
+
+          </View>
         </View>
       )}
 
       {/* --- MODAL WHEEL PICKER --- */}
       <Modal visible={isWheelModalVisible} transparent animationType="fade" onRequestClose={() => setIsWheelModalVisible(false)}>
         <View style={styles.modalOverlay}>
-           <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Tempo de Descanso</Text>
-              <View style={styles.wheelContainer}>
-                 <View style={styles.wheelHighlight} />
-                 <FlatList
-                    data={TIME_OPTIONS}
-                    keyExtractor={item => item.toString()}
-                    showsVerticalScrollIndicator={false}
-                    snapToInterval={ITEM_HEIGHT}
-                    decelerationRate="fast"
-                    contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-                    getItemLayout={(_, index) => ({ length: ITEM_HEIGHT, offset: ITEM_HEIGHT * index, index })}
-                    onMomentumScrollEnd={(ev) => {
-                       const index = Math.round(ev.nativeEvent.contentOffset.y / ITEM_HEIGHT);
-                       if (TIME_OPTIONS[index]) {
-                          setSelectedCustomTime(TIME_OPTIONS[index]);
-                          triggerHaptic('selection');
-                       }
-                    }}
-                    renderItem={({ item }) => (
-                       <TouchableOpacity 
-                          style={[styles.pickerItem, { height: ITEM_HEIGHT }]} 
-                          onPress={() => setSelectedCustomTime(item)}
-                       >
-                          <Text style={[styles.pickerText, selectedCustomTime === item && styles.pickerTextSelected]}>
-                             {formatLabel(item)}
-                          </Text>
-                       </TouchableOpacity>
-                    )}
-                 />
-              </View>
-              <View style={styles.modalActions}>
-                 <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setIsWheelModalVisible(false)}>
-                    <Feather name="x" size={24} color="#A0AEC0" />
-                 </TouchableOpacity>
-                 <TouchableOpacity style={styles.modalBtnStart} onPress={handleStartCustom}>
-                    <Feather name="play" size={24} color="#FFF" />
-                    <Text style={styles.btnStartText}>INICIAR</Text>
-                 </TouchableOpacity>
-              </View>
-           </View>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Tempo de Descanso</Text>
+            <View style={styles.wheelContainer}>
+              <View style={styles.wheelHighlight} />
+              <FlatList
+                data={TIME_OPTIONS}
+                keyExtractor={item => item.toString()}
+                showsVerticalScrollIndicator={false}
+                snapToInterval={ITEM_HEIGHT}
+                decelerationRate="fast"
+                contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
+                getItemLayout={(_, index) => ({ length: ITEM_HEIGHT, offset: ITEM_HEIGHT * index, index })}
+                onMomentumScrollEnd={(ev) => {
+                  const index = Math.round(ev.nativeEvent.contentOffset.y / ITEM_HEIGHT);
+                  if (TIME_OPTIONS[index]) {
+                    setSelectedCustomTime(TIME_OPTIONS[index]);
+                    triggerHaptic('selection');
+                  }
+                }}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[styles.pickerItem, { height: ITEM_HEIGHT }]}
+                    onPress={() => setSelectedCustomTime(item)}
+                  >
+                    <Text style={[styles.pickerText, selectedCustomTime === item && styles.pickerTextSelected]}>
+                      {formatLabel(item)}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              />
+            </View>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalBtnCancel} onPress={() => setIsWheelModalVisible(false)}>
+                <Feather name="x" size={24} color="#A0AEC0" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalBtnStart} onPress={handleStartCustom}>
+                <Feather name="play" size={24} color="#FFF" />
+                <Text style={styles.btnStartText}>INICIAR</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
     </>
@@ -391,7 +391,7 @@ export default function RestTimer() {
 const styles = StyleSheet.create({
   overlay: { ...StyleSheet.absoluteFillObject, zIndex: 998 },
   fabContainer: { position: 'absolute', width: FAB_SIZE, height: FAB_SIZE, justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  
+
   fab: { width: FAB_SIZE, height: FAB_SIZE, borderRadius: FAB_SIZE / 2, justifyContent: 'center', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 4.65, elevation: 8, borderWidth: 2, borderColor: '#FFF', zIndex: 1001 },
   fabIdle: { backgroundColor: '#718096' },
   fabActive: { backgroundColor: '#007AFF', borderColor: '#1A202C' },

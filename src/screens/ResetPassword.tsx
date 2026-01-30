@@ -26,6 +26,7 @@ export default function ResetPasswordScreen({ navigation }: Props) {
   const [showPassword, setShowPassword] = useState(false);
 
   const handleUpdatePassword = async () => {
+    // 1. Validações Locais (Antes de chamar o banco)
     if (newPassword.length < 6) {
       return Alert.alert(t.common.attention, 'A senha deve ter pelo menos 6 caracteres.');
     }
@@ -36,30 +37,35 @@ export default function ResetPasswordScreen({ navigation }: Props) {
 
     setLoading(true);
     try {
-      // Ao atualizar o usuário, o Supabase dispara o evento USER_UPDATED
-      // O App.tsx vai capturar isso e trocar a tela para a Home automaticamente
+      // 2. Tenta atualizar no Supabase
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       
       if (error) throw error;
 
-      // Caso a transição automática não ocorra por algum motivo de timing,
-      // o alerta abaixo serve de feedback, e o botão força um refresh.
-      Alert.alert(
-        t.common.success, 
-        'Sua senha foi atualizada! Você será redirecionado.',
-        [{ 
-          text: 'OK / Ir para Home', 
-          onPress: async () => {
-            // Força a atualização da sessão para garantir que o App.tsx perceba
-            await supabase.auth.refreshSession();
-          } 
-        }]
-      );
+      // 3. SUCESSO!
+      // O evento USER_UPDATED será disparado no App.tsx.
+      // Como o link do email já deixou a sessão ativa, isso levará o usuário para a Home.
+      
+      // SE VOCÊ QUISER FORÇAR LOGIN NOVAMENTE (Segurança Extra):
+      // Descomente a linha abaixo. Isso fará logout e jogará para a tela de Login.
+      // await supabase.auth.signOut(); 
+
+      Alert.alert(t.common.success, 'Sua senha foi atualizada com sucesso!');
+
     } catch (e: any) {
+      // 4. ERRO: O usuário CONTINUA NESTA TELA para tentar de novo
       Alert.alert(t.common.error, e.message || 'Não foi possível atualizar a senha.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCancel = async () => {
+    // Se o usuário desistir, precisamos fazer LOGOUT, 
+    // pois o link do e-mail logou ele automaticamente.
+    setLoading(true);
+    await supabase.auth.signOut();
+    // O App.tsx detectará SIGNED_OUT e levará para a tela de Login
   };
 
   return (
@@ -113,85 +119,45 @@ export default function ResetPasswordScreen({ navigation }: Props) {
           {loading ? (
             <ActivityIndicator color="#FFF" />
           ) : (
-            <Text style={styles.buttonText}>Redefinir e Entrar</Text>
+            <Text style={styles.buttonText}>Atualizar Senha</Text>
           )}
         </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.cancelButton} 
+          onPress={handleCancel}
+          disabled={loading}
+        >
+          <Text style={styles.cancelText}>Cancelar e Sair</Text>
+        </TouchableOpacity>
+
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#FFF' 
-  },
-  scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
+  container: { flex: 1, backgroundColor: '#FFF' },
+  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 24 },
   iconContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#EBF8FF',
-    justifyContent: 'center',
-    alignSelf: 'center'
+    alignItems: 'center', marginBottom: 24, width: 80, height: 80,
+    borderRadius: 40, backgroundColor: '#EBF8FF', justifyContent: 'center', alignSelf: 'center'
   },
-  title: { 
-    fontSize: 24, 
-    fontWeight: '800', 
-    marginBottom: 8, 
-    color: '#1A202C', 
-    textAlign: 'center' 
-  },
-  subtitle: { 
-    fontSize: 16, 
-    color: '#718096', 
-    marginBottom: 32, 
-    textAlign: 'center',
-    lineHeight: 24
-  },
+  title: { fontSize: 24, fontWeight: '800', marginBottom: 8, color: '#1A202C', textAlign: 'center' },
+  subtitle: { fontSize: 16, color: '#718096', marginBottom: 32, textAlign: 'center', lineHeight: 24 },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1, 
-    borderColor: '#E2E8F0', 
-    borderRadius: 12, 
-    backgroundColor: '#F7FAFC',
-    marginBottom: 16,
+    flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0', 
+    borderRadius: 12, backgroundColor: '#F7FAFC', marginBottom: 16,
   },
-  input: { 
-    flex: 1,
-    padding: 16, 
-    fontSize: 16, 
-    color: '#2D3748',
-  },
-  eyeIcon: {
-    padding: 16,
-  },
+  input: { flex: 1, padding: 16, fontSize: 16, color: '#2D3748' },
+  eyeIcon: { padding: 16 },
   button: { 
-    backgroundColor: '#007AFF', 
-    padding: 16, 
-    borderRadius: 12, 
-    alignItems: 'center',
-    marginTop: 8,
-    shadowColor: '#007AFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: '#007AFF', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 8,
+    shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 4,
   },
-  buttonDisabled: { 
-    backgroundColor: '#A0AEC0',
-    shadowOpacity: 0 
-  },
-  buttonText: { 
-    color: '#FFF', 
-    fontSize: 16, 
-    fontWeight: 'bold' 
-  },
+  buttonDisabled: { backgroundColor: '#A0AEC0', shadowOpacity: 0 },
+  buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  
+  cancelButton: { marginTop: 20, alignItems: 'center', padding: 10 },
+  cancelText: { color: '#E53E3E', fontSize: 15, fontWeight: '600' }
 });

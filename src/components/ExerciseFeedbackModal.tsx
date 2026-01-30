@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Modal, View, Text, StyleSheet, TouchableOpacity, TextInput, 
   ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, 
-  Alert, ScrollView, Keyboard, TouchableWithoutFeedback
+  Alert, ScrollView, Keyboard, TouchableWithoutFeedback, Dimensions
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import VideoPlayerModal from './VideoPlayerModal'; 
@@ -10,6 +10,30 @@ import { fetchMessages, sendMessage } from '@/services/feedback.service';
 import { updateExerciseInstructions } from '@/services/exercises.service';
 import { ExerciseMessage, ExerciseStaticData } from '@/types/feedback';
 import { supabase } from '@/lib/supabaseClient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context'; // [FIX] Importante
+
+// ... (Componente MessageBubble mantido igual, pode omitir se quiser economizar espaço na resposta) ...
+const MessageBubble = ({ message, isCurrentUser }: { message: ExerciseMessage, isCurrentUser: boolean }) => {
+    const time = new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const date = new Date(message.created_at).toLocaleDateString([], { day: 'numeric', month: 'short' });
+  
+    return (
+      <View style={[styles.messageContainer, isCurrentUser ? styles.messageContainerRight : styles.messageContainerLeft]}>
+        <View style={[styles.bubble, isCurrentUser ? styles.bubbleRight : styles.bubbleLeft]}>
+          <Text style={[styles.senderRole, { color: isCurrentUser ? '#FFF' : (message.sender_role === 'coach' ? '#9F7AEA' : '#4A5568') }]}>
+            {message.sender_role === 'coach' ? 'Coach' : 'Atleta'}
+          </Text>
+          <Text style={[styles.messageText, isCurrentUser ? { color: '#FFF' } : { color: '#1A202C' }]}>
+            {message.message}
+          </Text>
+          <Text style={[styles.messageTime, isCurrentUser ? { color: 'rgba(255,255,255,0.7)' } : { color: '#718096' }]}>
+            {date} às {time}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
 
 interface Props {
   visible: boolean;
@@ -21,47 +45,25 @@ interface Props {
   currentVideoUrl?: string | null;
 }
 
-const MessageBubble = ({ message, isCurrentUser }: { message: ExerciseMessage, isCurrentUser: boolean }) => {
-  const time = new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const date = new Date(message.created_at).toLocaleDateString([], { day: 'numeric', month: 'short' });
-
-  return (
-    <View style={[styles.messageContainer, isCurrentUser ? styles.messageContainerRight : styles.messageContainerLeft]}>
-      <View style={[styles.bubble, isCurrentUser ? styles.bubbleRight : styles.bubbleLeft]}>
-        <Text style={[styles.senderRole, { color: isCurrentUser ? '#FFF' : (message.sender_role === 'coach' ? '#9F7AEA' : '#4A5568') }]}>
-          {message.sender_role === 'coach' ? 'Coach' : 'Atleta'}
-        </Text>
-        <Text style={[styles.messageText, isCurrentUser ? { color: '#FFF' } : { color: '#1A202C' }]}>
-          {message.message}
-        </Text>
-        <Text style={[styles.messageTime, isCurrentUser ? { color: 'rgba(255,255,255,0.7)' } : { color: '#718096' }]}>
-          {date} às {time}
-        </Text>
-      </View>
-    </View>
-  );
-};
+const { height: screenHeight } = Dimensions.get('window');
 
 export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exerciseName, userId, currentNotes, currentVideoUrl }: Props) => {
+  const insets = useSafeAreaInsets(); // [FIX] Hook para pegar as áreas seguras
   
-  // Chat States
+  // ... (Todos os states mantidos iguais) ...
   const [messages, setMessages] = useState<ExerciseMessage[]>([]);
   const [loadingMsg, setLoadingMsg] = useState(true);
   const [newMessage, setNewMessage] = useState('');
-  
-  // Data & Edit States
   const [staticData, setStaticData] = useState<ExerciseStaticData | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editNotes, setEditNotes] = useState('');
   const [editVideo, setEditVideo] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
-
-  // Visual States
   const [videoModalVisible, setVideoModalVisible] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const flatListRef = useRef<FlatList<ExerciseMessage>>(null);
 
-  // 1. Fetch User ID
+  // ... (useEffect e loadData mantidos iguais) ...
   useEffect(() => {
     const fetchUser = async () => {
         const { data: { user } } = await supabase.auth.getUser();
@@ -70,56 +72,38 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
     fetchUser();
   }, []);
 
-  // 2. Fetch Dados ao abrir
   const loadData = useCallback(async () => {
     if (!definitionId || !userId) return;
-    
-    // Dados Estáticos
-    const { data } = await supabase
-      .from('exercise_definitions')
-      .select('default_notes, video_url')
-      .eq('id', definitionId)
-      .single();
-    
+    const { data } = await supabase.from('exercise_definitions').select('default_notes, video_url').eq('id', definitionId).single();
     if (data) {
       setStaticData(data as ExerciseStaticData);
       setEditNotes(data.default_notes || '');
       setEditVideo(data.video_url || '');
     }
-
-    // Mensagens
     setLoadingMsg(true);
     const msgs = await fetchMessages(definitionId, userId);
     setMessages(msgs);
     setLoadingMsg(false);
   }, [definitionId, userId]);
 
-  useEffect(() => {
-    if (visible) loadData();
-  }, [visible, loadData]);
+  useEffect(() => { if (visible) loadData(); }, [visible, loadData]);
 
-  // Scroll Chat
   useEffect(() => {
     if (visible && messages.length > 0 && !loadingMsg) {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 300);
     }
   }, [messages, visible, loadingMsg]);
 
-  // --- Handlers ---
-
+  // ... (Handlers handleSendMessage e handleSaveEdits mantidos iguais) ...
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !definitionId || !userId || !currentUserId) return;
     try {
       const role = userId === currentUserId ? 'aluno' : 'coach';
       await sendMessage(definitionId, userId, currentUserId, newMessage.trim(), role);
       setNewMessage('');
-      Keyboard.dismiss();
-      // Recarrega chat
       const msgs = await fetchMessages(definitionId, userId);
       setMessages(msgs);
-    } catch (e) {
-      Alert.alert('Erro', 'Não foi possível enviar a mensagem.');
-    }
+    } catch (e) { Alert.alert('Erro', 'Não foi possível enviar a mensagem.'); }
   };
 
   const handleSaveEdits = async () => {
@@ -130,33 +114,35 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
       setIsEditing(false);
       setStaticData({ default_notes: editNotes, video_url: editVideo });
       Alert.alert('Sucesso', 'Instruções atualizadas.');
-    } catch (e: any) {
-      Alert.alert('Erro', 'Falha ao salvar: ' + e.message);
-    } finally {
-      setSavingEdit(false);
-    }
+    } catch (e: any) { Alert.alert('Erro', 'Falha ao salvar: ' + e.message); } finally { setSavingEdit(false); }
   };
 
   if (!definitionId || !userId) return null;
-
-  // Lógica de Prioridade
   const displayVideo = currentVideoUrl || staticData?.video_url || '';
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+        style={styles.container}
+        // No Android, o pageSheet já lida um pouco com isso, no iOS precisamos ajustar se não for pageSheet puro.
+        // Mas o principal aqui é o insets.top no header.
+      >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.contentContainer}>
 
             {/* --- TERÇO 1: VÍDEO & HEADER --- */}
-            <View style={styles.topSection}>
+            {/* [FIX] Adicionado paddingTop com insets.top e aumentada a altura base */}
+            <View style={[styles.topSection, { paddingTop: Math.max(insets.top, 16), height: 180 + Math.max(insets.top, 0) }]}>
               <View style={styles.headerRow}>
                 <Text style={styles.exerciseTitle} numberOfLines={1}>{exerciseName}</Text>
-                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                  <Feather name="x" size={24} color="#4A5568" />
+                {/* [FIX] Aumentado hitSlop para facilitar o toque */}
+                <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={{top: 15, bottom: 15, left: 15, right: 15}}>
+                  <Feather name="x" size={28} color="#4A5568" />
                 </TouchableOpacity>
               </View>
 
+              {/* ... (Resto do conteúdo do Vídeo/Edição mantido igual) ... */}
               {isEditing ? (
                 <View style={styles.editVideoContainer}>
                   <Text style={styles.label}>Link do Vídeo (Padrão)</Text>
@@ -167,9 +153,7 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
                   {displayVideo ? (
                     <TouchableOpacity onPress={() => setVideoModalVisible(true)} style={[styles.videoPreview, currentVideoUrl ? {backgroundColor:'#2F855A'} : {}]}>
                       <Feather name="play-circle" size={48} color="#FFF" />
-                      <Text style={styles.videoText}>
-                        {currentVideoUrl ? 'Vídeo Específico do Treino' : 'Ver Execução Padrão'}
-                      </Text>
+                      <Text style={styles.videoText}>{currentVideoUrl ? 'Vídeo Específico do Treino' : 'Ver Execução Padrão'}</Text>
                     </TouchableOpacity>
                   ) : (
                     <View style={styles.noVideoState}>
@@ -181,9 +165,10 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
               )}
             </View>
 
-            {/* --- TERÇO 2: INSTRUÇÕES --- */}
-            <View style={styles.middleSection}>
-              <View style={styles.sectionHeader}>
+            {/* --- TERÇO 2: INSTRUÇÕES (Mantido igual) --- */}
+            <View style={[styles.middleSection, { flexShrink: 1 }]}>
+               {/* ... (Conteúdo das instruções mantido) ... */}
+               <View style={styles.sectionHeader}>
                 <View style={{flexDirection: 'row', alignItems: 'center', gap: 6}}>
                   <Feather name="file-text" size={14} color="#718096" />
                   <Text style={styles.sectionTitle}>INSTRUÇÕES TÉCNICAS</Text>
@@ -204,8 +189,6 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
                 </View>
               ) : (
                 <ScrollView style={styles.notesScroll} contentContainerStyle={{flexGrow: 1}}>
-                  
-                  {/* Bloco de Nota Específica */}
                   {currentNotes && (
                     <View style={styles.coachNoteBox}>
                       <View style={{flexDirection:'row', alignItems:'center', gap: 6, marginBottom: 4}}>
@@ -215,8 +198,6 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
                       <Text style={styles.coachNoteText}>{currentNotes}</Text>
                     </View>
                   )}
-
-                  {/* Nota Padrão */}
                   {staticData?.default_notes ? (
                     <Text style={styles.instructionText}>{staticData.default_notes}</Text>
                   ) : (
@@ -226,9 +207,10 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
               )}
             </View>
 
-            {/* --- TERÇO 3: CHAT --- */}
-            <View style={styles.bottomSection}>
-              <View style={styles.sectionHeader}>
+            {/* --- TERÇO 3: CHAT (Com ajuste de Safe Area inferior) --- */}
+            <View style={[styles.bottomSection, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+              {/* ... (Conteúdo do chat mantido) ... */}
+               <View style={styles.sectionHeader}>
                 <Feather name="message-circle" size={14} color="#718096" />
                 <Text style={styles.sectionTitle}>FEEDBACK & HISTÓRICO</Text>
               </View>
@@ -268,7 +250,6 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
-
       <VideoPlayerModal visible={videoModalVisible} videoUrl={displayVideo} onClose={() => setVideoModalVisible(false)} />
     </Modal>
   );
@@ -277,14 +258,16 @@ export const ExerciseFeedbackModal = ({ visible, onClose, definitionId, exercise
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7FAFC' },
   contentContainer: { flex: 1, flexDirection: 'column' },
-  topSection: { flex: 1, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#FFF', padding: 16 },
-  middleSection: { flex: 1.2, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#F7FAFC', padding: 16 },
-  bottomSection: { flex: 1.2, backgroundColor: '#FFF', paddingHorizontal: 16, paddingTop: 16 },
+  // Altura dinâmica agora é controlada inline no componente
+  topSection: { borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#FFF', paddingHorizontal: 16, paddingBottom: 16 }, 
+  middleSection: { flex: 1, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#F7FAFC', padding: 16 },
+  bottomSection: { flex: 1.5, backgroundColor: '#FFF', paddingHorizontal: 16, paddingTop: 16 },
 
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   exerciseTitle: { fontSize: 18, fontWeight: '800', color: '#2D3748', flex: 1, marginRight: 10 },
-  closeBtn: { padding: 4 },
+  closeBtn: { padding: 4 }, // HitSlop aumentou a área de toque, o padding visual pode ser pequeno
   
+  // ... (Restante dos estilos mantidos iguais ao arquivo anterior) ...
   videoContainer: { flex: 1, borderRadius: 12, overflow: 'hidden' },
   videoPreview: { flex: 1, backgroundColor: '#2D3748', justifyContent: 'center', alignItems: 'center' },
   videoText: { color: '#FFF', marginTop: 8, fontWeight: '600' },
@@ -298,27 +281,17 @@ const styles = StyleSheet.create({
   instructionText: { fontSize: 15, color: '#2D3748', lineHeight: 22 },
   notesScroll: { flex: 1 },
 
-  // Estilos da Nota Específica
-  coachNoteBox: {
-    backgroundColor: '#F0FFF4',
-    padding: 12,
-    borderRadius: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#38A169',
-    marginBottom: 16
-  },
+  coachNoteBox: { backgroundColor: '#F0FFF4', padding: 12, borderRadius: 8, borderLeftWidth: 3, borderLeftColor: '#38A169', marginBottom: 16 },
   coachNoteTitle: { fontSize: 12, fontWeight: '700', color: '#276749' },
   coachNoteText: { fontSize: 14, color: '#22543D', lineHeight: 20 },
 
   emptyText: { fontStyle: 'italic', color: '#A0AEC0', textAlign: 'center', marginTop: 20 },
   
-  // Edit Styles
   editVideoContainer: { flex: 1, justifyContent: 'center' },
   label: { fontSize: 12, fontWeight: '700', color: '#718096', marginBottom: 6 },
   inputEdit: { backgroundColor: '#FFF', borderWidth: 1, borderColor: '#CBD5E0', borderRadius: 8, padding: 10, fontSize: 14, color: '#2D3748' },
   textAreaEdit: { flex: 1, textAlignVertical: 'top' },
 
-  // Chat
   chatListContent: { paddingBottom: 10, flexGrow: 1 },
   inputArea: { flexDirection: 'row', alignItems: 'flex-end', paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#F0F0F0' },
   input: { flex: 1, backgroundColor: '#F7FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8, maxHeight: 80, fontSize: 14, marginRight: 8, color: '#2D3748' },

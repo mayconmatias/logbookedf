@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,6 @@ import {
   Image,
   Switch,
   RefreshControl,
-  Dimensions
 } from 'react-native';
 import { supabase } from '@/lib/supabaseClient';
 import { User } from '@supabase/supabase-js';
@@ -21,9 +20,12 @@ import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 
+// [NOVO] Integrações
+import { createCoachSubaccount } from '@/services/asaas.service';
+import { StravaConnect } from '@/components/StravaConnect';
+
 type ProfileScreenProps = NativeStackScreenProps<RootStackParamList, 'Profile'>;
 
-// Tipagem local para as compras
 interface PurchaseItem {
   id: string;
   product: {
@@ -40,22 +42,19 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [uploading, setUploading] = useState(false);
   
-  // Dados do Usuário
   const [user, setUser] = useState<User | null>(null);
   const [profileData, setProfileData] = useState<any>(null);
   const [myPurchases, setMyPurchases] = useState<PurchaseItem[]>([]);
 
-  // Estados de Controle
   const [isCoachMode, setIsCoachMode] = useState(false);
 
-  // --- 1. CARREGAMENTO DE DADOS ---
+  // --- CARREGAMENTO ---
   const fetchProfileData = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Usuário não encontrado');
       setUser(user);
 
-      // Busca Perfil + Plano
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
@@ -65,7 +64,6 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
       if (error) throw error;
       setProfileData(profile);
 
-      // Busca Compras (Minha Biblioteca)
       const { data: purchases, error: purchaseError } = await supabase
         .from('user_purchases')
         .select(`
@@ -96,7 +94,7 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
     }, [fetchProfileData])
   );
 
-  // --- 2. UPLOAD DE FOTO ---
+  // --- UPLOAD FOTO ---
   const handlePickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -127,7 +125,6 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
 
       await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user!.id);
       
-      // Atualiza localmente
       setProfileData((prev: any) => ({ ...prev, avatar_url: publicUrl }));
 
     } catch (e: any) {
@@ -137,7 +134,6 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
     }
   };
 
-  // --- 3. AÇÕES ---
   const handleLogout = async () => {
     await supabase.auth.signOut();
   };
@@ -145,10 +141,44 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
   const handleSwitchMode = (value: boolean) => {
     setIsCoachMode(value);
     if (value) {
-      // Navega para a área do treinador e depois reseta o switch visualmente (opcional)
-      // Ou mantemos o switch ligado pra indicar "Estou focado nisso agora"
       navigation.navigate('CoachStudentsList');
     }
+  };
+
+  // --- [NOVO] ATIVAR RECEBIMENTOS (FINANCEIRO) ---
+  const handleActivatePayments = async () => {
+    Alert.alert(
+      "Ativar Carteira",
+      "Deseja criar sua conta financeira para receber pagamentos de consultoria?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        { 
+          text: "Criar Conta", 
+          onPress: async () => {
+            try {
+              setLoading(true);
+              // Dados mockados para o MVP. Em produção, use um formulário real.
+              await createCoachSubaccount({
+                name: profileData?.display_name || "Coach",
+                email: user?.email || "",
+                cpfCnpj: profileData?.cpf || "00000000000", 
+                mobilePhone: "11999999999",
+                address: "Rua Digital",
+                addressNumber: "100",
+                province: "Centro",
+                postalCode: "01001000"
+              });
+              Alert.alert("Sucesso", "Sua carteira digital foi criada! Agora você pode vender planos.");
+              fetchProfileData(); 
+            } catch (e: any) {
+              Alert.alert("Erro Financeiro", e.message);
+            } finally {
+              setLoading(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   const getPlanBadge = (plan: string) => {
@@ -158,8 +188,7 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
     return { label: 'GRATUITO', color: '#718096', icon: 'user' };
   };
 
-  // --- RENDER ---
-  if (loading) {
+  if (loading && !profileData) {
     return <View style={styles.center}><ActivityIndicator size="large" color="#007AFF" /></View>;
   }
 
@@ -171,7 +200,7 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchProfileData(); }} />}
     >
-      {/* HEADER: Identidade */}
+      {/* HEADER */}
       <View style={styles.header}>
         <View style={styles.avatarSection}>
           <TouchableOpacity onPress={handlePickImage} disabled={uploading} style={styles.avatarWrapper}>
@@ -204,24 +233,43 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
           </View>
         </View>
 
-        {/* MODO TREINADOR (Switch) */}
+        {/* SWITCH E FINANCEIRO DO COACH */}
         {isCoach && (
-          <View style={styles.coachSwitchContainer}>
-            <View style={{flex: 1}}>
-              <Text style={styles.switchTitle}>Modo Treinador</Text>
-              <Text style={styles.switchSub}>Gerenciar alunos e treinos</Text>
+          <View>
+            <View style={styles.coachSwitchContainer}>
+              <View style={{flex: 1}}>
+                <Text style={styles.switchTitle}>Modo Treinador</Text>
+                <Text style={styles.switchSub}>Gerenciar alunos e treinos</Text>
+              </View>
+              <Switch
+                trackColor={{ false: "#767577", true: "#805AD5" }}
+                thumbColor={isCoachMode ? "#FFF" : "#f4f3f4"}
+                onValueChange={handleSwitchMode}
+                value={isCoachMode}
+              />
             </View>
-            <Switch
-              trackColor={{ false: "#767577", true: "#805AD5" }}
-              thumbColor={isCoachMode ? "#FFF" : "#f4f3f4"}
-              onValueChange={handleSwitchMode}
-              value={isCoachMode}
-            />
+
+            {/* Botão Financeiro: Só aparece se ainda não tiver wallet */}
+            {!profileData?.asaas_wallet_id && (
+               <TouchableOpacity 
+                 style={styles.financeButton}
+                 onPress={handleActivatePayments}
+               >
+                 <Feather name="dollar-sign" size={20} color="#38A169" />
+                 <Text style={styles.financeButtonText}>Ativar Recebimentos</Text>
+                 <Feather name="chevron-right" size={20} color="#38A169" style={{marginLeft: 'auto'}} />
+               </TouchableOpacity>
+            )}
           </View>
         )}
       </View>
 
-      {/* MINHA BIBLIOTECA (Compras) */}
+      {/* INTEGRAÇÃO STRAVA */}
+      <View style={{ paddingHorizontal: 20, marginTop: 20 }}>
+        <StravaConnect />
+      </View>
+
+      {/* MINHA BIBLIOTECA */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Feather name="book-open" size={18} color="#4A5568" />
@@ -236,7 +284,7 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
                 style={styles.libraryCard}
                 onPress={() => {
                   if (item.product.product_type.includes('program')) {
-                    navigation.navigate('MyPrograms'); // Redireciona para gestão
+                    navigation.navigate('MyPrograms'); 
                   } else {
                     navigation.navigate('ExerciseCatalog');
                   }
@@ -268,7 +316,7 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
         )}
       </View>
 
-      {/* ASSINATURA & PLANOS */}
+      {/* ASSINATURA */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Feather name="credit-card" size={18} color="#4A5568" />
@@ -296,7 +344,7 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
         )}
       </View>
 
-      {/* CONFIGURAÇÕES GERAIS */}
+      {/* MENU */}
       <View style={styles.menuSection}>
         <TouchableOpacity style={styles.menuItem} onPress={() => Alert.prompt('Editar Nome', 'Novo nome:', async (t) => {
            if(t) {
@@ -309,12 +357,6 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
           <Feather name="chevron-right" size={20} color="#CBD5E0" />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.menuItem} onPress={() => Alert.alert('Segurança', 'Alteração de senha em breve.')}>
-          <Feather name="lock" size={20} color="#4A5568" />
-          <Text style={styles.menuText}>Segurança e Senha</Text>
-          <Feather name="chevron-right" size={20} color="#CBD5E0" />
-        </TouchableOpacity>
-
         <TouchableOpacity style={[styles.menuItem, {borderBottomWidth: 0}]} onPress={handleLogout}>
           <Feather name="log-out" size={20} color="#E53E3E" />
           <Text style={[styles.menuText, {color: '#E53E3E'}]}>Sair da Conta</Text>
@@ -322,7 +364,7 @@ export default function ProfileScreen({ navigation }: ProfileScreenProps) {
       </View>
 
       <View style={styles.footerInfo}>
-        <Text style={styles.versionText}>Logbook EdF v1.0.2</Text>
+        <Text style={styles.versionText}>Logbook EdF v1.0.3</Text>
         <Text style={styles.userIdText}>ID: {user?.id.slice(0, 8)}...</Text>
       </View>
 
@@ -352,11 +394,16 @@ const styles = StyleSheet.create({
   switchTitle: { fontSize: 16, fontWeight: '700', color: '#553C9A' },
   switchSub: { fontSize: 12, color: '#805AD5' },
 
+  financeButton: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0FFF4', 
+    padding: 12, borderRadius: 12, marginTop: 10, borderWidth: 1, borderColor: '#C6F6D5'
+  },
+  financeButtonText: { color: '#276749', fontWeight: '700', marginLeft: 10 },
+
   section: { marginTop: 20, paddingHorizontal: 20 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#2D3748' },
 
-  // Library Styles
   libraryList: { gap: 12, paddingRight: 20 },
   libraryCard: { width: 120, marginRight: 12 },
   libraryImage: { width: 120, height: 80, borderRadius: 8, marginBottom: 6 },
@@ -367,7 +414,6 @@ const styles = StyleSheet.create({
   emptyLibraryText: { color: '#718096', marginBottom: 4 },
   linkText: { color: '#007AFF', fontWeight: '700' },
 
-  // Subscription Cards
   upgradeCard: { flexDirection: 'row', padding: 20, borderRadius: 16, alignItems: 'center' },
   upgradeTitle: { fontSize: 16, fontWeight: '700', color: '#FFF', marginBottom: 4 },
   upgradeSub: { fontSize: 12, color: '#CBD5E0', marginRight: 10, lineHeight: 16 },
@@ -378,7 +424,6 @@ const styles = StyleSheet.create({
   activePlanTitle: { fontSize: 12, color: '#718096', textTransform: 'uppercase', marginBottom: 2 },
   activePlanName: { fontSize: 18, fontWeight: '800', color: '#2D3748' },
 
-  // Menu
   menuSection: { marginTop: 30, backgroundColor: '#FFF', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#E2E8F0' },
   menuItem: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#F0F0F0' },
   menuText: { flex: 1, marginLeft: 12, fontSize: 15, color: '#2D3748', fontWeight: '500' },

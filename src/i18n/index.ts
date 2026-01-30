@@ -21,7 +21,7 @@ i18n
     interpolation: {
       escapeValue: false, // React já protege contra XSS
     },
-    compatibilityJSON: 'v3', // Compatibilidade com Android
+    compatibilityJSON: 'v4', // Compatibilidade com Android
   });
 
 export default i18n;

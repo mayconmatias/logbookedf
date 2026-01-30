@@ -1,8 +1,8 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Dimensions, ScrollView } from 'react-native';
-import { 
-  Canvas, Path, Rect, Line, Skia, DashPathEffect, 
-  LinearGradient, vec, Group, Circle 
+import {
+  Canvas, Path, Rect, Line, Skia, DashPathEffect,
+  LinearGradient, vec, Group, Circle, RoundedRect
 } from '@shopify/react-native-skia';
 import * as d3 from 'd3';
 import { Feather } from '@expo/vector-icons';
@@ -23,8 +23,8 @@ interface Props {
   title?: string;
 }
 
-export const MacroEvolutionChart = ({ 
-  data, 
+export const MacroEvolutionChart = ({
+  data,
   colorVolume = '#805AD5', // Roxo
   colorReps = '#319795',   // Teal (Mais escuro que antes)
   title = "Macro Evolução"
@@ -55,7 +55,7 @@ export const MacroEvolutionChart = ({
 
     // Eixo Y1 (Volume) - Usamos isso para a linha e para o Eixo Y lateral
     const scaleYVol = d3.scaleLinear()
-      .domain([0, maxVol * 1.2]) 
+      .domain([0, maxVol * 1.2])
       .range([GRAPH_HEIGHT, 0]); // 0 no topo do graph area
 
     // Ticks para o Eixo Y Lateral (5 divisões)
@@ -63,19 +63,19 @@ export const MacroEvolutionChart = ({
 
     // Eixo Y2 (Reps) - Barras ocupam 40% da altura inferior
     const scaleYRepsHeight = d3.scaleLinear()
-      .domain([0, maxReps * 1.5]) 
-      .range([0, GRAPH_HEIGHT * 0.5]); 
+      .domain([0, maxReps * 1.5])
+      .range([0, GRAPH_HEIGHT * 0.5]);
 
     // 3. Caminhos
     const volPoints = data.map((d, i) => ({ x: scaleX(i), y: scaleYVol(d.volume) + TOP_PADDING }));
     const linePath = Skia.Path.MakeFromSVGString(generateCurvedPath(volPoints))!;
-    
+
     const areaGenerator = d3.area<any>()
       .x((_, i) => scaleX(i))
       .y0(CHART_HEIGHT - BOTTOM_PADDING)
       .y1(d => scaleYVol(d.volume) + TOP_PADDING)
       .curve(d3.curveCatmullRom.alpha(0.5));
-    
+
     const areaPath = Skia.Path.MakeFromSVGString(areaGenerator(data) || "")!;
 
     // 4. Tendência (Slope)
@@ -85,13 +85,13 @@ export const MacroEvolutionChart = ({
     let trendColor = "#A0AEC0";
 
     if (trendVol) {
-       const isPositive = trendVol.slopeValue < 0; // Y menor = mais alto visualmente
-       trendCoords = {
-         p1: vec(scaleX(0), trendVol.start.y),
-         p2: vec(scaleX(data.length - 1), trendVol.end.y),
-       };
-       if (isPositive) { trendLabel = "Crescente 🚀"; trendColor = "#38A169"; }
-       else { trendLabel = "Decrescente 🔻"; trendColor = "#E53E3E"; }
+      const isPositive = trendVol.slopeValue < 0; // Y menor = mais alto visualmente
+      trendCoords = {
+        p1: vec(scaleX(0), trendVol.start.y),
+        p2: vec(scaleX(data.length - 1), trendVol.end.y),
+      };
+      if (isPositive) { trendLabel = "Crescente 🚀"; trendColor = "#38A169"; }
+      else { trendLabel = "Decrescente 🔻"; trendColor = "#E53E3E"; }
     }
 
     return {
@@ -104,50 +104,50 @@ export const MacroEvolutionChart = ({
 
   return (
     <View style={styles.container}>
-      
+
       {/* HEADER */}
       <View style={styles.header}>
         <View>
-           <Text style={styles.title}>{title}</Text>
-           <View style={{flexDirection: 'row', alignItems: 'center', gap: 8}}>
-              <View style={{flexDirection:'row', alignItems:'center', gap:4}}>
-                 <View style={[styles.legendDot, {backgroundColor: colorVolume}]} />
-                 {/* [MUDANÇA] Texto da legenda atualizado */}
-                 <Text style={styles.legendText}>Vol. Médio (kg)</Text> 
-              </View>
-              <View style={{flexDirection:'row', alignItems:'center', gap:4}}>
-                 <View style={[styles.legendDot, {backgroundColor: colorReps}]} />
-                 <Text style={styles.legendText}>Reps</Text>
-              </View>
-           </View>
+          <Text style={styles.title}>{title}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <View style={[styles.legendDot, { backgroundColor: colorVolume }]} />
+              {/* [MUDANÇA] Texto da legenda atualizado */}
+              <Text style={styles.legendText}>Vol. Médio (kg)</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <View style={[styles.legendDot, { backgroundColor: colorReps }]} />
+              <Text style={styles.legendText}>Reps</Text>
+            </View>
+          </View>
         </View>
         <View style={[styles.trendBadge, { borderColor: trends.color }]}>
-           <Text style={[styles.trendLabel, { color: trends.color }]}>{trends.label}</Text>
+          <Text style={[styles.trendLabel, { color: trends.color }]}>{trends.label}</Text>
         </View>
       </View>
 
       <View style={{ flexDirection: 'row', height: CHART_HEIGHT }}>
-        
+
         {/* EIXO Y FIXO (Esquerda) */}
         <View style={styles.yAxisContainer}>
-           {ticks.map((tick, i) => (
-             <Text key={i} style={[styles.yAxisText, { 
-               position: 'absolute', 
-               top: scales.yVol(tick) + TOP_PADDING - 6 
-             }]}>
-               {tick >= 1000 ? `${(tick/1000).toFixed(1)}k` : tick}
-             </Text>
-           ))}
+          {ticks.map((tick, i) => (
+            <Text key={i} style={[styles.yAxisText, {
+              position: 'absolute',
+              top: scales.yVol(tick) + TOP_PADDING - 6
+            }]}>
+              {tick >= 1000 ? `${(tick / 1000).toFixed(1)}k` : tick}
+            </Text>
+          ))}
         </View>
 
         {/* ÁREA DE SCROLL (Gráfico) */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 20 }}>
           <View style={{ width: CANVAS_WIDTH, height: CHART_HEIGHT }}>
             <Canvas style={{ flex: 1 }}>
-              
+
               {/* LINHAS DE GRADE (Grid) */}
               {ticks.map((tick, i) => (
-                <Line 
+                <Line
                   key={`grid-${i}`}
                   p1={vec(0, scales.yVol(tick) + TOP_PADDING)}
                   p2={vec(CANVAS_WIDTH, scales.yVol(tick) + TOP_PADDING)}
@@ -161,16 +161,16 @@ export const MacroEvolutionChart = ({
                 const barHeight = scales.yRepsH(d.avgReps);
                 const x = scales.x(i) - 14; // Barra de 28px
                 const y = CHART_HEIGHT - BOTTOM_PADDING - barHeight;
-                
+
                 return (
                   <Group key={`bar-${i}`}>
                     {/* Fundo da barra */}
-                    <Rect
+                    <RoundedRect
                       x={x} y={y} width={28} height={barHeight}
                       color={colorReps} opacity={0.6} r={4} // Opacidade aumentada
                     />
                     {/* Topo da barra (destaque) */}
-                    <Rect
+                    <RoundedRect
                       x={x} y={y} width={28} height={3}
                       color={colorReps} opacity={1} r={2}
                     />
@@ -227,36 +227,36 @@ export const MacroEvolutionChart = ({
 
               return (
                 <React.Fragment key={`lbl-${i}`}>
-                   
-                   {/* Badge de Volume (Acima) */}
-                   <View style={[styles.valBadge, { 
-                     left: xPos - 25, 
-                     top: yPos - 30,
-                     backgroundColor: colorVolume
-                   }]}>
-                     <Text style={styles.valText}>
-                       {d.volume >= 1000 ? `${(d.volume/1000).toFixed(1)}k` : Math.round(d.volume)}
-                     </Text>
-                   </View>
 
-                   {/* Valor de Reps (Base da barra) */}
-                   {d.avgReps > 0 && (
-                     <Text style={[styles.repsText, {
-                       left: xPos - 20,
-                       bottom: BOTTOM_PADDING + 4,
-                       color: '#2C5282' // Azul escuro para contraste
-                     }]}>
-                       {Math.round(d.avgReps)}r
-                     </Text>
-                   )}
+                  {/* Badge de Volume (Acima) */}
+                  <View style={[styles.valBadge, {
+                    left: xPos - 25,
+                    top: yPos - 30,
+                    backgroundColor: colorVolume
+                  }]}>
+                    <Text style={styles.valText}>
+                      {d.volume >= 1000 ? `${(d.volume / 1000).toFixed(1)}k` : Math.round(d.volume)}
+                    </Text>
+                  </View>
 
-                   {/* Data (Eixo X) */}
-                   <Text style={[styles.dateText, { 
-                     left: xPos - 25, 
-                     bottom: 8 
-                   }]}>
-                     {d.label}
-                   </Text>
+                  {/* Valor de Reps (Base da barra) */}
+                  {d.avgReps > 0 && (
+                    <Text style={[styles.repsText, {
+                      left: xPos - 20,
+                      bottom: BOTTOM_PADDING + 4,
+                      color: '#2C5282' // Azul escuro para contraste
+                    }]}>
+                      {Math.round(d.avgReps)}r
+                    </Text>
+                  )}
+
+                  {/* Data (Eixo X) */}
+                  <Text style={[styles.dateText, {
+                    left: xPos - 25,
+                    bottom: 8
+                  }]}>
+                    {d.label}
+                  </Text>
 
                 </React.Fragment>
               )
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 16, fontWeight: '800', color: '#2D3748', marginBottom: 4 },
   subtitle: { fontSize: 12, color: '#A0AEC0' },
-  
+
   trendBadge: {
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12,
     borderWidth: 1, backgroundColor: '#FAFAFA'
@@ -296,9 +296,9 @@ const styles = StyleSheet.create({
 
   // EIXOS
   yAxisContainer: {
-    width: 40, 
-    height: '100%', 
-    borderRightWidth: 1, 
+    width: 40,
+    height: '100%',
+    borderRightWidth: 1,
     borderRightColor: '#F0F0F0',
     backgroundColor: '#FAFAFA',
     zIndex: 10
@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: "#000", shadowOffset: {width:0, height:1}, shadowOpacity: 0.2, elevation: 2
+    shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, elevation: 2
   },
   valText: {
     color: '#FFF', fontSize: 11, fontWeight: 'bold'

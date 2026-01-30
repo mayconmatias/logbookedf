@@ -1,11 +1,25 @@
-import React from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
-import { Feather } from '@expo/vector-icons'; // [MIGRAÇÃO] Usando Feather nativo
+import { View, Text, StyleSheet, Dimensions, Image, LayoutChangeEvent } from 'react-native';
+import { useState } from 'react';
+import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { HistoricalSet } from '@/types/workout';
 import { calculateE1RM } from '@/utils/e1rm';
 
 const { width } = Dimensions.get('window');
+
+import { MusicTrackInfo } from '@/types/music';
+import { MusicMarquee } from './MusicMarquee';
+import {
+  Canvas,
+  RoundedRect,
+  Rect,
+  LinearGradient as SkiaLinearGradient,
+  vec,
+  Skia,
+  Mask,
+  BlurMask,
+  Group
+} from "@shopify/react-native-skia";
 
 interface Props {
   exerciseName: string;
@@ -15,6 +29,12 @@ interface Props {
   getDaysAgo: (date: string | Date) => string;
   bgOpacity: number;
   prKind?: 'e1rm' | 'reps' | 'none';
+  music?: MusicTrackInfo | null;
+  colors?: string[];
+  textColor?: string;
+  musicColor?: string;
+  borderRadius?: number;
+  feather?: number;
 }
 
 const DiffBadge = ({ diff, unit, isPositive }: any) => {
@@ -31,19 +51,19 @@ const DiffBadge = ({ diff, unit, isPositive }: any) => {
   );
 };
 
-const PerformanceColumn = ({ label, dateLabel, set }: any) => (
+const PerformanceColumn = ({ label, dateLabel, set, textColor = '#FFFFFF' }: any) => (
   <View style={styles.column}>
-    <Text style={styles.columnLabel}>{label}</Text>
-    <Text style={styles.dateLabel}>{dateLabel}</Text>
+    <Text style={[styles.columnLabel, { color: textColor, opacity: 0.6 }]}>{label}</Text>
+    <Text style={[styles.dateLabel, { color: textColor, opacity: 0.5 }]}>{dateLabel}</Text>
 
     <View style={styles.dataRow}>
-      <Text style={styles.dataValue}>{set.weight.toFixed(1)}</Text>
-      <Text style={styles.dataUnit}>kg</Text>
+      <Text style={[styles.dataValue, { color: textColor }]}>{set.weight.toFixed(1)}</Text>
+      <Text style={[styles.dataUnit, { color: textColor }]}>kg</Text>
     </View>
 
-    <Text style={styles.repText}>x {set.reps} reps</Text>
+    <Text style={[styles.repText, { color: textColor }]}>x {set.reps} reps</Text>
 
-    <Text style={styles.e1rmText}>
+    <Text style={[styles.e1rmText, { color: textColor, opacity: 0.6 }]}>
       {calculateE1RM(set.weight, set.reps).toFixed(1)} e1RM
     </Text>
   </View>
@@ -57,7 +77,19 @@ export default function SetShareCard({
   prKind = 'none',
   getDaysAgo,
   bgOpacity,
+  music,
+  colors = ['#232526', '#414345'],
+  textColor = '#FFFFFF',
+  musicColor = '#1DB954',
+  borderRadius = 20,
+  feather = 0,
 }: Props) {
+  const [layout, setLayout] = useState({ width: 0, height: 0 });
+  const onLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setLayout({ width, height });
+  };
+
   if (!set) return null;
 
   let repDiff = 0;
@@ -69,34 +101,61 @@ export default function SetShareCard({
   }
 
   return (
-    <View style={styles.wrapper}>
-      <View style={{ opacity: bgOpacity, ...StyleSheet.absoluteFillObject }}>
-        <LinearGradient
-          colors={['#232526', '#414345']}
-          style={styles.background}
-        />
+    <View onLayout={onLayout} style={[
+      styles.wrapper,
+      {
+        borderRadius: feather > 0 ? 0 : borderRadius,
+        overflow: feather > 0 ? 'visible' : 'hidden',
+        backgroundColor: 'transparent'
+      }
+    ]}>
+      <View style={StyleSheet.absoluteFillObject}>
+        <Canvas style={{ flex: 1 }}>
+          <Group opacity={bgOpacity}>
+            <Mask
+              mask={
+                <RoundedRect
+                  x={feather}
+                  y={feather}
+                  width={layout.width - 2 * feather}
+                  height={layout.height - 2 * feather}
+                  r={Math.max(0, borderRadius - feather)}
+                  color="black"
+                >
+                  <BlurMask blur={feather} style="normal" />
+                </RoundedRect>
+              }
+            >
+              <Rect x={0} y={0} width={layout.width} height={layout.height}>
+                <SkiaLinearGradient
+                  start={vec(0, 0)} end={vec(layout.width, layout.height / 2)}
+                  colors={colors.map(c => Skia.Color(c))}
+                />
+              </Rect>
+            </Mask>
+          </Group>
+        </Canvas>
       </View>
 
       <View style={{ opacity: 1 }}>
         <View style={styles.headerRow}>
           <View style={styles.header}>
-            {/* [MIGRAÇÃO] Ícone trocado para Feather */}
             {isPR && <Feather name="award" size={24} color="#F6E05E" style={{ marginRight: 10 }} />}
             <View>
-              <Text style={styles.title}>
+              <Text style={[styles.title, textColor !== '#FFFFFF' && { color: textColor }]}>
                 {isPR ? 'NOVO RECORDE!' : 'SÉRIE CONCLUÍDA'}
               </Text>
 
               {prKind === 'e1rm' && (
-                <Text style={styles.prType}>Recorde de peso / e1RM</Text>
+                <Text style={[styles.prType, { color: textColor, opacity: 0.8 }]}>Recorde de peso / e1RM</Text>
               )}
               {prKind === 'reps' && (
-                <Text style={styles.prType}>Recorde de repetições</Text>
+                <Text style={[styles.prType, { color: textColor, opacity: 0.8 }]}>Recorde de repetições</Text>
               )}
             </View>
           </View>
 
-          <Text style={styles.exerciseName}>{exerciseName}</Text>
+          <Text style={[styles.exerciseName, { color: textColor }]}>{exerciseName}</Text>
         </View>
 
         <View style={styles.compareBox}>
@@ -106,16 +165,18 @@ export default function SetShareCard({
                 label="ANTES"
                 set={previousSet}
                 dateLabel={getDaysAgo(previousSet.date)}
+                textColor={textColor}
               />
               <View style={styles.separator} />
               <PerformanceColumn
                 label="HOJE"
                 set={set}
                 dateLabel="hoje"
+                textColor={textColor}
               />
             </>
           ) : (
-            <PerformanceColumn label="HOJE" set={set} dateLabel="" />
+            <PerformanceColumn label="HOJE" set={set} dateLabel="" textColor={textColor} />
           )}
         </View>
 
@@ -123,6 +184,24 @@ export default function SetShareCard({
           <View style={styles.diffContainer}>
             <DiffBadge diff={weightDiff} unit="kg" isPositive={weightDiff > 0} />
             <DiffBadge diff={repDiff} unit="reps" isPositive={repDiff > 0} />
+          </View>
+        )}
+
+        {music && (
+          <View style={styles.musicContainer}>
+            {music.albumArt ? (
+              <Image source={{ uri: music.albumArt }} style={styles.albumArt} />
+            ) : (
+              <View style={[styles.albumArt, styles.albumPlaceholder]}>
+                <Feather name="music" size={16} color="#FFF" />
+              </View>
+            )}
+            <View style={{ flex: 1, overflow: 'hidden' }}>
+              <MusicMarquee
+                text={`${music.track} • ${music.artist}`}
+                style={[styles.musicText, { color: musicColor }]}
+              />
+            </View>
           </View>
         )}
       </View>
@@ -134,8 +213,6 @@ const styles = StyleSheet.create({
   wrapper: {
     width: width - 48,
     padding: 24,
-    borderRadius: 20,
-    overflow: 'hidden',
   },
   background: { flex: 1 },
   headerRow: { marginBottom: 16 },
@@ -176,4 +253,28 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   diffText: { color: '#FFF', fontWeight: 'bold' },
+  musicContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    padding: 10,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 12,
+    gap: 10
+  },
+  albumArt: {
+    width: 40,
+    height: 40,
+    borderRadius: 4
+  },
+  albumPlaceholder: {
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  musicText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600'
+  }
 });

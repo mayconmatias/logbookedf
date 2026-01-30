@@ -15,7 +15,7 @@ const calculateSessionTEV = (
   return exercise.sets.reduce((sum, set) => {
     // [NOVO] Ignora aquecimento no cálculo local
     if (set.set_type === 'warmup') return sum;
-    
+
     return sum + (set.weight || 0) * (set.reps || 0);
   }, 0);
 };
@@ -29,6 +29,7 @@ export const useShareFlows = (groupedWorkout: WorkoutExercise[]) => {
 
   const [isSharingPR, setIsSharingPR] = useState(false);
   const [exerciseNameToShare, setExerciseNameToShare] = useState('');
+  const [definitionIdToShare, setDefinitionIdToShare] = useState<string | null>(null);
 
   const [progressionDataForModal, setProgressionDataForModal] =
     useState<ChartDataPoint[] | null>(null);
@@ -38,13 +39,14 @@ export const useShareFlows = (groupedWorkout: WorkoutExercise[]) => {
 
   // --- Modal de Série (PR ou normal) ---
   const handleOpenSetShareModal = useCallback(
-    (set: WorkoutSet, isPR: boolean, exerciseName: string, sessionWorkoutId: string | null) => {
-      setSetToShare({ 
-        ...set, 
-        sessionWorkoutId: sessionWorkoutId || undefined 
+    (set: WorkoutSet, isPR: boolean, exerciseName: string, definitionId: string, sessionWorkoutId: string | null) => {
+      setSetToShare({
+        ...set,
+        sessionWorkoutId: sessionWorkoutId || undefined
       });
       setIsSharingPR(isPR);
       setExerciseNameToShare(exerciseName);
+      setDefinitionIdToShare(definitionId);
       setIsSetShareModalVisible(true);
     },
     []
@@ -59,6 +61,7 @@ export const useShareFlows = (groupedWorkout: WorkoutExercise[]) => {
     async (set: WorkoutSet, exerciseName: string, definitionId: string) => {
       setSetToShare(set);
       setExerciseNameToShare(exerciseName);
+      setDefinitionIdToShare(definitionId);
       setIsProgressionShareModalVisible(true);
 
       setProgressionDataForModal(null);
@@ -97,6 +100,7 @@ export const useShareFlows = (groupedWorkout: WorkoutExercise[]) => {
     setToshare,
     isSharingPR,
     exerciseNameToShare,
+    definitionIdToShare,
     progressionDataForModal,
     currentSessionTEV,
     isFetchingShareData,

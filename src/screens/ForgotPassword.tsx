@@ -9,63 +9,48 @@ import {
   ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  ScrollView
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
 
 import { supabase } from '@/lib/supabaseClient';
 import { RootStackParamList } from '@/types/navigation';
-import { validateCPF } from '@/utils/validation';
 import t from '@/i18n/pt';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ForgotPassword'>;
 
 export default function ForgotPasswordScreen({ navigation }: Props) {
-  const [cpf, setCpf] = useState('');
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleReset = async () => {
-    // 1. Validação local do CPF
-    if (!validateCPF(cpf)) {
-      return Alert.alert(t.common.attention, 'Por favor, insira um CPF válido.');
+    if (!email || !email.includes('@')) {
+      return Alert.alert(t.common.attention, 'Por favor, insira um e-mail válido.');
     }
 
     setLoading(true);
     Keyboard.dismiss();
 
     try {
-      // 2. Busca o E-mail vinculado ao CPF (Segurança: Lógica no Banco de Dados)
-      const { data: email, error: rpcError } = await supabase.rpc('get_email_by_cpf', { 
-        p_cpf: cpf 
-      });
-      
-      if (rpcError) throw rpcError;
-      
-      // Se não retornou e-mail, fingimos que enviou para não revelar se o CPF existe (Security by Obscurity)
-      // Ou, se preferir UX explícita: throw new Error('CPF não encontrado.');
-      if (!email) {
-        throw new Error('CPF não encontrado na base de dados.');
-      }
-
-      // 3. Dispara o e-mail de recuperação
-      // IMPORTANTE: O redirectTo aponta para a rota de Callback do seu site Next.js
-      // Isso garante que o cookie de sessão seja gravado corretamente no navegador.
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email as string, {
-        redirectTo: 'https://logbookedf.pro/auth/callback?next=/auth/update-password',
+      // Envia link de recuperação direto para o e-mail
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        // Ajuste esta URL para o seu Deep Link ou URL do site se usar Web
+        redirectTo: 'logbookedf://reset-password',
       });
 
-      if (resetError) throw resetError;
+      if (error) throw error;
 
       Alert.alert(
         'E-mail enviado!',
-        'Acesse seu e-mail e clique no link para criar uma nova senha através do nosso site seguro.',
-        [{ text: 'Voltar para Login', onPress: () => navigation.goBack() }]
+        'Se este e-mail estiver cadastrado, você receberá um link para redefinir sua senha em instantes.',
+        [{ text: 'Voltar para Login', onPress: () => navigation.navigate('Login') }]
       );
 
     } catch (e: any) {
-      console.error(e);
-      Alert.alert('Erro', e.message || 'Falha ao solicitar recuperação.');
+      // Por segurança, não devemos dizer se o e-mail existe ou não, mas para UX mostramos erro genérico
+      Alert.alert('Atenção', e.message || 'Falha ao solicitar recuperação.');
     } finally {
       setLoading(false);
     }
@@ -76,26 +61,26 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.iconContainer}>
           <Feather name="lock" size={48} color="#007AFF" />
         </View>
 
         <Text style={styles.title}>Recuperar Senha</Text>
         <Text style={styles.subtitle}>
-          Digite seu CPF abaixo. Enviaremos um link seguro para o seu e-mail cadastrado.
+          Digite seu e-mail cadastrado. Enviaremos um link para você criar uma nova senha.
         </Text>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.label}>CPF</Text>
+          <Text style={styles.label}>E-mail</Text>
           <TextInput
             style={styles.input}
-            placeholder="000.000.000-00"
+            placeholder="seu@email.com"
             placeholderTextColor="#A0AEC0"
-            keyboardType="number-pad"
-            value={cpf}
-            onChangeText={(text) => setCpf(text.replace(/[^0-9]/g, ''))} // Mantém apenas números visualmente
-            maxLength={14}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            value={email}
+            onChangeText={setEmail}
           />
         </View>
 
@@ -107,103 +92,49 @@ export default function ForgotPasswordScreen({ navigation }: Props) {
           {loading ? (
             <ActivityIndicator color="#FFF" />
           ) : (
-            <Text style={styles.buttonText}>Enviar Link de Recuperação</Text>
+            <Text style={styles.buttonText}>Enviar Link</Text>
           )}
         </TouchableOpacity>
         
         <TouchableOpacity 
-          onPress={() => navigation.goBack()} 
+          onPress={() => navigation.navigate('Login')} 
           style={styles.backButton}
           disabled={loading}
         >
           <Text style={styles.backText}>Voltar para Login</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#FFF' 
-  },
-  content: {
-    flex: 1,
-    padding: 24,
-    justifyContent: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#FFF' },
+  content: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+  
   iconContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#EBF8FF',
-    justifyContent: 'center',
-    alignSelf: 'center'
+    alignItems: 'center', marginBottom: 24, width: 80, height: 80,
+    borderRadius: 40, backgroundColor: '#EBF8FF', justifyContent: 'center', alignSelf: 'center'
   },
   title: { 
-    fontSize: 24, 
-    fontWeight: '800', 
-    marginBottom: 12, 
-    color: '#1A202C', 
-    textAlign: 'center' 
+    fontSize: 24, fontWeight: '800', marginBottom: 12, color: '#1A202C', textAlign: 'center' 
   },
   subtitle: { 
-    fontSize: 15, 
-    color: '#718096', 
-    marginBottom: 32, 
-    textAlign: 'center',
-    lineHeight: 22
+    fontSize: 15, color: '#718096', marginBottom: 32, textAlign: 'center', lineHeight: 22 
   },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4A5568',
-    marginBottom: 8,
-    marginLeft: 4
-  },
+  inputContainer: { marginBottom: 20 },
+  label: { fontSize: 14, fontWeight: '600', color: '#4A5568', marginBottom: 8, marginLeft: 4 },
   input: { 
-    borderWidth: 1, 
-    borderColor: '#E2E8F0', 
-    borderRadius: 12, 
-    padding: 16, 
-    fontSize: 16, 
-    backgroundColor: '#F7FAFC',
-    color: '#2D3748'
+    borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 16, 
+    fontSize: 16, backgroundColor: '#F7FAFC', color: '#2D3748'
   },
   button: { 
-    backgroundColor: '#007AFF', 
-    padding: 16, 
-    borderRadius: 12, 
-    alignItems: 'center',
-    shadowColor: '#007AFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+    backgroundColor: '#007AFF', padding: 16, borderRadius: 12, alignItems: 'center',
+    shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2, shadowRadius: 8, elevation: 4
   },
-  buttonDisabled: { 
-    backgroundColor: '#A0AEC0',
-    shadowOpacity: 0
-  },
-  buttonText: { 
-    color: '#FFF', 
-    fontSize: 16, 
-    fontWeight: 'bold' 
-  },
-  backButton: { 
-    marginTop: 24, 
-    alignItems: 'center',
-    padding: 10
-  },
-  backText: { 
-    color: '#007AFF', 
-    fontSize: 15, 
-    fontWeight: '600' 
-  },
+  buttonDisabled: { backgroundColor: '#A0AEC0', shadowOpacity: 0 },
+  buttonText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
+  backButton: { marginTop: 24, alignItems: 'center', padding: 10 },
+  backText: { color: '#007AFF', fontSize: 15, fontWeight: '600' },
 });

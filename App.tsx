@@ -9,7 +9,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import * as Linking from 'expo-linking';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { registerRootComponent } from 'expo';
 
 import './src/i18n/index.ts';
 
@@ -31,7 +30,7 @@ import { Toaster } from 'sonner-native';
 import DashboardScreen from "@/screens/DashboardScreen";
 
 // Telas de Autenticação
-import LoginCPF from "@/screens/LoginCPF";
+import LoginScreen from "@/screens/LoginScreen";
 import Signup from "@/screens/Signup"; 
 import ForgotPassword from "@/screens/ForgotPassword";
 import ResetPassword from "@/screens/ResetPassword";
@@ -47,7 +46,7 @@ import MarketplaceScreen from '@/screens/MarketplaceScreen';
 import ProductDetailsScreen from '@/screens/ProductDetailsScreen'; 
 import NotificationsScreen from '@/screens/NotificationsScreen';
 
-// [CORREÇÃO] Import da tela wrapper do Modal
+// Wrapper do Modal
 import ExerciseFeedbackScreen from '@/screens/ExerciseFeedbackScreen'; 
 
 // Telas do Treinador
@@ -64,7 +63,11 @@ const linking = {
   prefixes: ['logbookedf://', Linking.createURL('/')],
   config: {
     screens: {
+      Login: 'login',
+      Signup: 'signup',
+      ForgotPassword: 'forgot-password',
       ResetPassword: 'reset-password',
+      Home: 'home',
     },
   },
 };
@@ -159,7 +162,11 @@ export default function App() {
         if (event === 'PASSWORD_RECOVERY') {
           setIsPasswordRecovery(true);
         } 
-        else if (event === 'SIGNED_OUT' || event === 'USER_UPDATED') {
+        else if (event === 'SIGNED_OUT') {
+          setIsPasswordRecovery(false);
+        }
+        // [CORREÇÃO] Ao atualizar o usuário (trocar senha), saímos do modo de recuperação
+        else if (event === 'USER_UPDATED') {
           setIsPasswordRecovery(false);
         }
       }
@@ -200,6 +207,10 @@ export default function App() {
                             title: 'Criar Nova Senha',
                             headerLeft: () => null 
                           }} 
+                          // Se sair da tela (ex: sucesso), garante reset do estado
+                          listeners={{
+                            blur: () => setIsPasswordRecovery(false)
+                          }}
                         />
                       </Stack.Navigator>
                    ) : (
@@ -219,7 +230,6 @@ export default function App() {
                         <Stack.Screen name="ProductDetails" component={ProductDetailsScreen} options={{ title: 'Detalhes' }} />
                         <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Notificações' }} />
                         
-                        {/* [CORREÇÃO] Rota do Modal de Feedback Transparente */}
                         <Stack.Screen 
                           name="ExerciseFeedback" 
                           component={ExerciseFeedbackScreen} 
@@ -227,7 +237,6 @@ export default function App() {
                             presentation: 'transparentModal',
                             headerShown: false,
                             animation: 'fade',
-                            // remove o fundo branco padrão para garantir transparência
                             contentStyle: { backgroundColor: 'transparent' }
                           }} 
                         />
@@ -244,8 +253,8 @@ export default function App() {
                       </Stack.Navigator>
                    )
                 ) : (
-                  <Stack.Navigator initialRouteName="LoginCPF">
-                    <Stack.Screen name="LoginCPF" component={LoginCPF} options={{ title: "Login" }} />
+                  <Stack.Navigator initialRouteName="Login">
+                    <Stack.Screen name="Login" component={LoginScreen} options={{ title: "Login" }} />
                     <Stack.Screen name="Signup" component={Signup} options={{ title: "Criar conta" }} />
                     <Stack.Screen name="ForgotPassword" component={ForgotPassword} options={{ title: "Recuperar Senha" }} />
                   </Stack.Navigator>

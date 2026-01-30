@@ -1,3 +1,5 @@
+import { MusicTrackInfo } from './music';
+
 export type SetType = 'normal' | 'warmup' | 'drop' | 'rest_pause' | 'cluster' | 'biset' | 'triset';
 
 export interface WorkoutSet {
@@ -10,11 +12,12 @@ export interface WorkoutSet {
   observations?: string;
   performed_at?: string;
   side?: 'E' | 'D' | null;
+  music_data?: MusicTrackInfo;
 
   set_type: SetType;
   parent_set_id?: string | null;
-  
-  subSets?: WorkoutSet[]; 
+
+  subSets?: WorkoutSet[];
   sessionWorkoutId?: string;
 }
 
@@ -25,7 +28,7 @@ export interface WorkoutExercise {
   sets: WorkoutSet[];
   order_in_workout: number;
   is_unilateral: boolean;
-  
+
   // [NOVO] Campos específicos da sessão (vindos do programa)
   notes?: string;
   video_url?: string;

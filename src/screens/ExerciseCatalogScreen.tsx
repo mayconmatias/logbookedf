@@ -53,11 +53,11 @@ const formatDate = (dateString: string) => {
 };
 
 const FilterChip = ({ label, isActive, onPress }: { label: string, isActive: boolean, onPress: () => void }) => (
-  <TouchableOpacity 
+  <TouchableOpacity
     style={[
-      styles.chip, 
-      isActive && styles.chipActive 
-    ]} 
+      styles.chip,
+      isActive && styles.chipActive
+    ]}
     onPress={onPress}
   >
     <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
@@ -68,7 +68,7 @@ const FilterChip = ({ label, isActive, onPress }: { label: string, isActive: boo
 
 interface QuickAddFormProps {
   definitionId: string;
-  lastSet?: ExerciseSetHistoryItem; 
+  lastSet?: ExerciseSetHistoryItem;
   onSetAdded: () => void;
 }
 
@@ -87,15 +87,15 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
 
   const handleQuickAdd = async () => {
     if (!weight || !reps) return Alert.alert(t.common.attention, 'Peso e Reps são obrigatórios.');
-    
+
     setSaving(true);
-    Keyboard.dismiss(); 
+    Keyboard.dismiss();
 
     try {
       const todayWorkoutId = await getOrCreateTodayWorkoutId();
       const exerciseInstanceId = await getOrCreateExerciseInWorkout(todayWorkoutId, definitionId);
       const todayWorkoutData = await fetchAndGroupWorkoutData(todayWorkoutId);
-      
+
       const exerciseInWorkout = todayWorkoutData.find((ex: WorkoutExercise) => ex.id === exerciseInstanceId);
       const nextSetNumber = (exerciseInWorkout ? exerciseInWorkout.sets.length : 0) + 1;
 
@@ -107,9 +107,9 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
         rpe: rpe ? parseFloat(rpe) : undefined,
       });
 
-      Alert.alert('Sucesso', 'Série adicionada ao treino de hoje!'); 
+      Alert.alert('Sucesso', 'Série adicionada ao treino de hoje!');
       onSetAdded();
-      
+
     } catch (e: any) {
       Alert.alert(t.common.error, e.message);
     } finally {
@@ -120,15 +120,15 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
   return (
     <View style={styles.quickAddForm}>
       <Text style={styles.sectionLabel}>Adicionar Série ao Treino de Hoje:</Text>
-      
+
       <View style={styles.inputRow}>
         <View style={styles.inputWrapper}>
           <Text style={styles.inputLabel}>Carga (kg)</Text>
-          <TextInput 
-            style={styles.input} 
-            placeholder="0" 
-            keyboardType="numeric" 
-            value={weight} 
+          <TextInput
+            style={styles.input}
+            placeholder="0"
+            keyboardType="numeric"
+            value={weight}
             onChangeText={setWeight}
             selectTextOnFocus
           />
@@ -136,11 +136,11 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
 
         <View style={styles.inputWrapper}>
           <Text style={styles.inputLabel}>Reps</Text>
-          <TextInput 
-            style={styles.input} 
-            placeholder="0" 
-            keyboardType="numeric" 
-            value={reps} 
+          <TextInput
+            style={styles.input}
+            placeholder="0"
+            keyboardType="numeric"
+            value={reps}
             onChangeText={setReps}
             selectTextOnFocus
           />
@@ -148,11 +148,11 @@ const QuickAddForm: React.FC<QuickAddFormProps> = ({ definitionId, lastSet, onSe
 
         <View style={styles.inputWrapper}>
           <Text style={styles.inputLabel}>RPE (opc)</Text>
-          <TextInput 
-            style={styles.input} 
-            placeholder="-" 
-            keyboardType="numeric" 
-            value={rpe} 
+          <TextInput
+            style={styles.input}
+            placeholder="-"
+            keyboardType="numeric"
+            value={rpe}
             onChangeText={setRpe}
             selectTextOnFocus
           />
@@ -195,20 +195,20 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
 
   return (
     <View style={styles.ninhoContainer}>
-      
+
       <View style={styles.ninhoHeader}>
-         <View style={styles.ninhoHeaderLeft}>
-            <Feather name="clock" size={14} color="#718096" />
-            <Text style={styles.ninhoHeaderTitle}>Histórico Recente</Text>
-         </View>
-         <View style={styles.ninhoActions}>
-            <TouchableOpacity style={styles.iconBtn} onPress={onShowAnalytics}>
-              <Feather name="bar-chart-2" size={20} color="#007AFF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.iconBtn} onPress={onOpenMenu}>
-              <Feather name="more-horizontal" size={20} color="#4A5568" />
-            </TouchableOpacity>
-         </View>
+        <View style={styles.ninhoHeaderLeft}>
+          <Feather name="clock" size={14} color="#718096" />
+          <Text style={styles.ninhoHeaderTitle}>Histórico Recente</Text>
+        </View>
+        <View style={styles.ninhoActions}>
+          <TouchableOpacity style={styles.iconBtn} onPress={onShowAnalytics}>
+            <Feather name="bar-chart-2" size={20} color="#007AFF" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn} onPress={onOpenMenu}>
+            <Feather name="more-horizontal" size={20} color="#4A5568" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {loading ? <ActivityIndicator style={{ marginVertical: 20 }} /> : (
@@ -220,8 +220,8 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
               <View key={`history-${definitionId}-${index}`} style={styles.historyRow}>
                 <Text style={styles.colDate}>{formatDate(item.workout_date)}</Text>
                 <View style={styles.colData}>
-                   <Text style={styles.dataText}>{item.weight}kg <Text style={styles.xText}>x</Text> {item.reps}</Text>
-                   {item.is_pr && <Feather name="award" size={14} color="#D69E2E" style={{marginLeft: 6}} />}
+                  <Text style={styles.dataText}>{item.weight}kg <Text style={styles.xText}>x</Text> {item.reps}</Text>
+                  {item.is_pr && <Feather name="award" size={14} color="#D69E2E" style={{ marginLeft: 6 }} />}
                 </View>
               </View>
             ))
@@ -229,10 +229,10 @@ const ExerciseHistoryNinho: React.FC<ExerciseHistoryProps> = ({ definitionId, on
         </View>
       )}
 
-      <QuickAddForm 
-        definitionId={definitionId} 
-        onSetAdded={loadHistory} 
-        lastSet={lastSet} 
+      <QuickAddForm
+        definitionId={definitionId}
+        onSetAdded={loadHistory}
+        lastSet={lastSet}
       />
     </View>
   );
@@ -263,13 +263,14 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
   const promptToCreateExercise = useCallback(async () => {
     Alert.prompt('Novo Exercício', 'Nome do exercício:', [
       { text: 'Cancelar', style: 'cancel' },
-      { 
-        text: 'Salvar', 
+      {
+        text: 'Salvar',
         onPress: async (name?: string) => {
           if (!name) return;
           const newEx = await handleCreateExercise(name);
           if (newEx) setExpandedExercise(newEx.exercise_id);
-      }}
+        }
+      }
     ], 'plain-text');
   }, [handleCreateExercise]);
 
@@ -308,32 +309,36 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
   const handleEditName = (definitionId: string, oldNameCapitalized: string) => {
     Alert.prompt('Editar Nome', `Novo nome para "${oldNameCapitalized}":`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Salvar', onPress: async (newName?: string) => {
+      {
+        text: 'Salvar', onPress: async (newName?: string) => {
           if (!newName || newName.trim() === '') return Alert.alert('Erro', 'Nome inválido');
           const success = await handleRenameExercise(definitionId, newName.trim());
           if (success) setExpandedExercise(null);
-      }}
+        }
+      }
     ], 'plain-text', oldNameCapitalized);
   };
 
   const handleDeleteHistoryWithConfirm = (definitionId: string, name: string) => {
     Alert.alert('Tem certeza?', `Isso apagará todo o histórico de "${name}".`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Apagar', style: 'destructive', onPress: async () => {
+      {
+        text: 'Apagar', style: 'destructive', onPress: async () => {
           const success = await handleDeleteExercise(definitionId, name);
           if (success) setExpandedExercise(null);
-      }}
+        }
+      }
     ]);
   };
 
   const handleOpenMenu = (item: CatalogExerciseItem) => {
     if (item.is_system) {
       Alert.alert(
-        'Exercício Oficial', 
+        'Exercício Oficial',
         'Este é um exercício padrão do sistema. Você pode adicionar suas próprias notas pessoais.',
         [
-           { text: 'Editar Minhas Notas', onPress: () => handleEditInstructions(item) },
-           { text: 'Cancelar', style: 'cancel' }
+          { text: 'Editar Minhas Notas', onPress: () => handleEditInstructions(item) },
+          { text: 'Cancelar', style: 'cancel' }
         ]
       );
       return;
@@ -357,38 +362,38 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
 
   return (
     <View style={styles.container}>
-      <TextInput 
-        style={styles.searchInput} 
-        placeholder="Buscar exercício..." 
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Buscar exercício..."
         placeholderTextColor="#A0AEC0"
-        value={searchTerm} 
-        onChangeText={setSearchTerm} 
+        value={searchTerm}
+        onChangeText={setSearchTerm}
       />
 
       {availableTags && availableTags.length > 0 && (
         <View style={{ height: 50 }}>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.chipsContainer}
           >
-            <FilterChip 
-              label="Todos" 
-              isActive={selectedTag === null} 
-              onPress={() => setSelectedTag(null)} 
+            <FilterChip
+              label="Todos"
+              isActive={selectedTag === null}
+              onPress={() => setSelectedTag(null)}
             />
             {availableTags.map((tag: string) => (
-              <FilterChip 
-                key={tag} 
-                label={tag} 
-                isActive={selectedTag === tag} 
-                onPress={() => setSelectedTag((prev: string | null) => prev === tag ? null : tag)} 
+              <FilterChip
+                key={tag}
+                label={tag}
+                isActive={selectedTag === tag}
+                onPress={() => setSelectedTag((prev: string | null) => prev === tag ? null : tag)}
               />
             ))}
           </ScrollView>
         </View>
       )}
-      
+
       <FlatList
         data={filteredExercises}
         keyExtractor={(item) => item.exercise_id}
@@ -400,40 +405,40 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
             <View style={[styles.cardContainer, isExpanded && styles.cardExpanded]}>
               <TouchableOpacity style={styles.card} onPress={() => setExpandedExercise(prev => prev === item.exercise_id ? null : item.exercise_id)}>
                 <View style={styles.cardContent}>
-                   <View style={{flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap'}}>
-                     <Text style={styles.cardTitle}>{item.exercise_name_capitalized}</Text>
-                     
-                     {item.is_system && (
-                        <View style={styles.verifiedBadge}>
-                          <Feather name="check" size={10} color="#FFF" />
-                        </View>
-                     )}
-                   </View>
-                   
-                   <Text style={styles.cardSubtitle}>
-                      {item.total_sets > 0 ? `${item.total_sets} séries registradas` : 'Nunca realizado'}
-                   </Text>
-                   
-                   {/* [NOVO] Botão de Vídeo direto no Card */}
-                   {item.video_url ? (
-                      <TouchableOpacity 
-                        style={styles.videoButton} 
-                        onPress={() => handleWatchVideo(item.video_url!)}
-                      >
-                        <Feather name="play-circle" size={14} color="#007AFF" />
-                        <Text style={styles.videoButtonText}>Ver Demo</Text>
-                      </TouchableOpacity>
-                   ) : null}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={styles.cardTitle}>{item.exercise_name_capitalized}</Text>
+
+                    {item.is_system && (
+                      <View style={styles.verifiedBadge}>
+                        <Feather name="check" size={10} color="#FFF" />
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.cardSubtitle}>
+                    {item.total_sets > 0 ? `${item.total_sets} séries registradas` : 'Nunca realizado'}
+                  </Text>
+
+                  {/* [NOVO] Botão de Vídeo direto no Card */}
+                  {item.video_url ? (
+                    <TouchableOpacity
+                      style={styles.videoButton}
+                      onPress={() => handleWatchVideo(item.video_url!)}
+                    >
+                      <Feather name="play-circle" size={14} color="#007AFF" />
+                      <Text style={styles.videoButtonText}>Ver Demo</Text>
+                    </TouchableOpacity>
+                  ) : null}
 
                 </View>
                 <Feather name={isExpanded ? "chevron-up" : "chevron-down"} size={22} color="#A0AEC0" />
               </TouchableOpacity>
-              
+
               {isExpanded && (
                 <ExerciseHistoryNinho
                   definitionId={item.exercise_id}
                   exerciseNameCapitalized={item.exercise_name_capitalized}
-                  onShowAnalytics={() => analyticsSheetRef.current?.openSheet(item.exercise_id, item.exercise_name_capitalized, null)}
+                  onShowAnalytics={() => analyticsSheetRef.current?.openSheet(item.exercise_id, item.exercise_name_capitalized, undefined)}
                   onOpenMenu={() => handleOpenMenu(item)}
                 />
               )}
@@ -461,7 +466,7 @@ export default function ExerciseCatalogScreen({ navigation }: CatalogScreenProps
       </Modal>
 
       {/* [NOVO] Player de Vídeo */}
-      <VideoPlayerModal 
+      <VideoPlayerModal
         visible={videoModalVisible}
         videoUrl={activeVideoUrl}
         onClose={() => setVideoModalVisible(false)}
@@ -477,7 +482,7 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   searchInput: { height: 48, borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, paddingHorizontal: 16, fontSize: 16, margin: 16, backgroundColor: '#F7FAFC', color: '#2D3748' },
   emptyList: { textAlign: 'center', marginTop: 32, fontSize: 16, color: '#718096' },
-  
+
   chipsContainer: { paddingHorizontal: 16, gap: 8, alignItems: 'center', paddingBottom: 10 },
   chip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: '#EDF2F7', borderWidth: 1, borderColor: '#E2E8F0' },
   chipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
@@ -523,7 +528,7 @@ const styles = StyleSheet.create({
   ninhoHeaderTitle: { fontSize: 12, fontWeight: '600', color: '#718096', textTransform: 'uppercase', letterSpacing: 0.5 },
   ninhoActions: { flexDirection: 'row', gap: 12 },
   iconBtn: { padding: 4 },
-  
+
   historyList: { marginHorizontal: 16, marginBottom: 12 },
   historyRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#EDF2F7' },
   colDate: { fontSize: 13, color: '#718096', width: 80 },
@@ -538,7 +543,7 @@ const styles = StyleSheet.create({
   inputWrapper: { flex: 1 },
   inputLabel: { fontSize: 11, fontWeight: '600', color: '#718096', marginBottom: 4, marginLeft: 2 },
   input: { borderWidth: 1, borderColor: '#CBD5E0', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, fontSize: 16, backgroundColor: '#FFF', textAlign: 'center', color: '#1A202C' },
-  
+
   buttonPrimary: { backgroundColor: '#007AFF', paddingVertical: 12, borderRadius: 8, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
   buttonTextPrimary: { color: '#fff', fontSize: 15, fontWeight: '600' },
   buttonDisabled: { backgroundColor: '#A9A9A9' },

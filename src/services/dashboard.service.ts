@@ -2,23 +2,23 @@ import { supabase } from '@/lib/supabaseClient';
 
 export interface VolumeStatItem {
   label: string;
-  weekly_sets: number;    
-  last_week_sets: number; 
+  weekly_sets: number;
+  last_week_sets: number;
 }
 
 export interface DashboardStats {
-  tag_stats: VolumeStatItem[];      
-  exercise_stats: VolumeStatItem[]; 
-  
-  evolution_trend: { 
-    date: string; 
+  tag_stats: VolumeStatItem[];
+  exercise_stats: VolumeStatItem[];
+
+  evolution_trend: {
+    date: string;
     volume: number;
     sets: number;
     density: number;
   }[];
 
-  evolution_daily: { 
-    date: string; 
+  evolution_daily: {
+    date: string;
     volume: number;
     sets: number;
     density: number;
@@ -39,7 +39,14 @@ export interface DashboardStats {
   } | null;
 
   current_streak: number;
-  consistency_matrix: string[]; 
+  consistency_matrix: string[];
+  cardio_summary?: {
+    monthly_count: number;
+    weekly_avg: number;
+    total_km: number;
+    total_kcal: number;
+    total_minutes: number;
+  };
 }
 
 export interface CheckinPayload {
@@ -60,7 +67,7 @@ export const fetchDashboardStats = async (
     p_set_types: setTypes || defaultTypes,
     p_program_id: programId || null
   });
-  
+
   if (error) throw error;
   return data as DashboardStats;
 };

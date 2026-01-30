@@ -13,7 +13,7 @@ const SESSION_KEY = '@sessionWorkoutId';
  */
 export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<string> => {
   const today = getLocalYYYYMMDD();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Usuário não encontrado');
 
@@ -39,7 +39,7 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
     .select('id')
     .eq('user_id', user.id)
     .eq('workout_date', today)
-    .is('ended_at', null); 
+    .is('ended_at', null);
 
   if (plannedColumn) {
     query = query.eq('planned_workout_id', plannedColumn);
@@ -55,7 +55,7 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
     .maybeSingle();
 
   if (findError) throw findError;
-  
+
   if (existingWorkout) {
     await AsyncStorage.setItem(SESSION_KEY, existingWorkout.id);
     return existingWorkout.id;
@@ -94,7 +94,7 @@ export const getOrCreateTodayWorkoutId = async (originId?: string): Promise<stri
 export const fetchAndGroupWorkoutData = async (
   currentWorkoutId: string
 ): Promise<WorkoutExercise[]> => {
-  
+
   const { data, error } = await supabase
     .from('exercises')
     .select(`
@@ -122,7 +122,8 @@ export const fetchAndGroupWorkoutData = async (
         side,
         performed_at,
         set_type,
-        parent_set_id
+        parent_set_id,
+        music_data
       )
     `)
     .eq('workout_id', currentWorkoutId)
@@ -139,7 +140,7 @@ export const fetchAndGroupWorkoutData = async (
       // 1. Aquecimento SEMPRE no topo
       const aIsWarmup = a.set_type === 'warmup';
       const bIsWarmup = b.set_type === 'warmup';
-      
+
       if (aIsWarmup && !bIsWarmup) return -1;
       if (!aIsWarmup && bIsWarmup) return 1;
 
@@ -201,16 +202,16 @@ export const finishWorkoutSession = async (
 
 export const fetchCurrentOpenSession = async () => {
   const today = getLocalYYYYMMDD();
-  
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
   const { data, error } = await supabase
     .from('workouts')
-    .select('id, template_id, planned_workout_id') 
+    .select('id, template_id, planned_workout_id')
     .eq('user_id', user.id)
     .eq('workout_date', today)
-    .is('ended_at', null) 
+    .is('ended_at', null)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -220,16 +221,16 @@ export const fetchCurrentOpenSession = async () => {
     return null;
   }
 
-  return data; 
+  return data;
 };
 
-export const fetchThisWeekWorkoutDays = async (): Promise<number[]> => {
+export const fetchThisWeekWorkoutDays = async (): Promise<{ workoutDays: number[], cardioDays: number[] }> => {
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+  if (!user) return { workoutDays: [], cardioDays: [] };
 
   const curr = new Date();
-  const currentDayIndex = curr.getDay(); 
-  
+  const currentDayIndex = curr.getDay();
+
   const startOfWeek = new Date(curr);
   startOfWeek.setDate(curr.getDate() - currentDayIndex);
 
@@ -253,18 +254,24 @@ export const fetchThisWeekWorkoutDays = async (): Promise<number[]> => {
     .gte('workout_date', firstDayStr)
     .lte('workout_date', lastDayStr);
 
-  if (error) {
-    console.error("Erro ao buscar frequência:", error);
-    return [];
-  }
+  // Fixed: Use proper timestamp filtering for external_activities
+  const { data: cardioData } = await supabase
+    .from('external_activities')
+    .select('start_date_local')
+    .eq('user_id', user.id)
+    .gte('start_date_local', `${firstDayStr}T00:00:00`)
+    .lte('start_date_local', `${lastDayStr}T23:59:59`);
 
-  const days = data.map(row => {
+  const workoutDays = [...new Set((data || []).map(row => {
     const [y, m, d] = row.workout_date.split('-').map(Number);
-    const localDate = new Date(y, m - 1, d); 
-    return localDate.getDay();
-  });
+    return new Date(y, m - 1, d).getDay();
+  }))];
 
-  return [...new Set(days)];
+  const cardioDays = [...new Set((cardioData || []).map(row => {
+    return new Date(row.start_date_local).getDay();
+  }))];
+
+  return { workoutDays, cardioDays };
 };
 
 export const sanitizeOpenSessions = async () => {

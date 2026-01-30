@@ -33,6 +33,7 @@ import DraggableFlatList, {
   ScaleDecorator 
 } from 'react-native-draggable-flatlist';
 import { supabase } from '@/lib/supabaseClient'; 
+import { useSafeAreaInsets } from 'react-native-safe-area-context'; // [FIX] Import
 
 // Import do Modal Unificado
 import { ExerciseFeedbackModal } from '@/components/ExerciseFeedbackModal';
@@ -45,6 +46,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'CoachWorkoutEditor'>;
 
 export default function CoachWorkoutEditor({ navigation, route }: Props) {
   const { workout, studentId: paramStudentId } = route.params;
+  const insets = useSafeAreaInsets(); // [FIX] Hook
   
   const [resolvedStudentId, setResolvedStudentId] = useState<string | undefined>(paramStudentId);
 
@@ -163,7 +165,6 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
     }
   };
 
-  // [FUNCIONALIDADE REATIVADA]
   const handleCreateAndAdd = async () => {
     if (!searchTerm || searchTerm.trim().length < 3) {
       Alert.alert('Atenção', 'O nome do exercício deve ter pelo menos 3 letras.');
@@ -430,7 +431,10 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined} 
+      style={styles.container}
+    >
       {loading && exercises.length === 0 ? (
         <ActivityIndicator style={{ marginTop: 20 }} />
       ) : (
@@ -439,15 +443,24 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
           keyExtractor={item => item.id}
           onDragEnd={onDragEnd}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          // [FIX] Padding Bottom para evitar overlap com a navbar/FABs
+          contentContainerStyle={{ paddingBottom: 100 + insets.bottom }}
           ListEmptyComponent={<Text style={styles.emptyText}>Adicione exercícios para começar.</Text>}
         />
       )}
 
-      <TouchableOpacity style={[styles.fab, styles.fabAi]} onPress={() => setIsAiModalVisible(true)}>
+      {/* [FIX] FABs com posicionamento seguro (bottom + insets) */}
+      <TouchableOpacity 
+        style={[styles.fab, styles.fabAi, { bottom: 96 + insets.bottom }]} 
+        onPress={() => setIsAiModalVisible(true)}
+      >
         <Feather name="cpu" size={24} color="#FFF" />
       </TouchableOpacity>
-      <TouchableOpacity style={styles.fab} onPress={() => setIsPickerVisible(true)}>
+      
+      <TouchableOpacity 
+        style={[styles.fab, { bottom: 24 + insets.bottom }]} 
+        onPress={() => setIsPickerVisible(true)}
+      >
         <Feather name="plus" size={24} color="#FFF" />
       </TouchableOpacity>
 
@@ -502,7 +515,6 @@ export default function CoachWorkoutEditor({ navigation, route }: Props) {
                         <Feather name="plus-circle" size={24} color="#007AFF" />
                     </TouchableOpacity>
                 )}
-                // [NOVO] Componente para Criar Exercício se não encontrar ou se quiser forçar
                 ListEmptyComponent={() => (
                   searchTerm.length > 2 ? (
                     <TouchableOpacity style={styles.createItem} onPress={handleCreateAndAdd} disabled={creatingNew}>
@@ -552,8 +564,8 @@ const styles = StyleSheet.create({
   deleteBtn: { padding: 10, backgroundColor: '#FFF5F5', borderRadius: 8 },
   saveBtn: { backgroundColor: '#007AFF', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
   saveText: { color: '#FFF', fontWeight: 'bold', fontSize: 14 },
-  fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', borderRadius: 28, elevation: 5 },
-  fabAi: { bottom: 96, backgroundColor: '#805AD5' },
+  fab: { position: 'absolute', right: 24, width: 56, height: 56, backgroundColor: '#007AFF', justifyContent: 'center', alignItems: 'center', borderRadius: 28, elevation: 5 },
+  fabAi: { backgroundColor: '#805AD5' },
   
   pickerContainer: { flex: 1, backgroundColor: '#F7FAFC', paddingTop: 40 },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', padding: 16 },
@@ -563,7 +575,6 @@ const styles = StyleSheet.create({
   pickerItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#EDF2F7', alignItems: 'center' },
   pickerItemText: { fontSize: 16, color: '#2D3748' },
   
-  // [NOVO] Estilos do item de criação
   createItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0FFF4', padding: 16, margin: 16, borderRadius: 12, borderWidth: 1, borderColor: '#C6F6D5' },
   createItemTitle: { fontSize: 16, fontWeight: '700', color: '#276749' },
   createItemSub: { fontSize: 13, color: '#2F855A' },

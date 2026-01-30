@@ -17,16 +17,16 @@ export const fetchUniqueExerciseCatalog = async (): Promise<CatalogExerciseItem[
 export const createExerciseDefinition = async (name: string) => {
   const { data, error } = await supabase
     .from('exercise_definitions')
-    .insert({ 
+    .insert({
       name: name.trim(),
-      user_id: (await supabase.auth.getUser()).data.user?.id 
+      user_id: (await supabase.auth.getUser()).data.user?.id
     })
     .select('id, name, name_lowercase')
     .single();
 
-  if (error) { 
-    if (error.code === '23505') throw new Error(`O exercício "${name.trim()}" já existe.`); 
-    throw new Error(error.message); 
+  if (error) {
+    if (error.code === '23505') throw new Error(`O exercício "${name.trim()}" já existe.`);
+    throw new Error(error.message);
   }
 
   const { data: globalData } = await supabase.rpc('find_global_tags_for_name', { p_name: name.trim() });
@@ -114,10 +114,10 @@ export const substituteExerciseInWorkout = async (
     .select('is_unilateral, name')
     .eq('id', newDefinitionId)
     .single();
-    
-  const isNewUnilateral = newDef?.is_unilateral || 
-                          (newDef?.name?.toLowerCase().includes('unilateral')) || 
-                          false;
+
+  const isNewUnilateral = newDef?.is_unilateral ||
+    (newDef?.name?.toLowerCase().includes('unilateral')) ||
+    false;
 
   // 4. Cria a instância do NOVO exercício na posição correta (logo abaixo do original)
   const { data: newExercise, error: createError } = await supabase
@@ -140,7 +140,7 @@ export const substituteExerciseInWorkout = async (
   if (originalExercise.sets && originalExercise.sets.length > 0) {
     // Ordena para garantir integridade sequencial
     const sortedSets = originalExercise.sets.sort((a: any, b: any) => a.set_number - b.set_number);
-    
+
     const setsToClone = sortedSets.map((s: any) => ({
       exercise_id: newExercise.id,
       set_number: s.set_number,
@@ -150,7 +150,7 @@ export const substituteExerciseInWorkout = async (
       set_type: s.set_type,
       observations: s.observations,
       // Ajusta lado se a unilateralidade mudou
-      side: isNewUnilateral ? (s.side || 'D') : null 
+      side: isNewUnilateral ? (s.side || 'D') : null
     }));
 
     const { error: setsError } = await supabase.from('sets').insert(setsToClone);
@@ -185,7 +185,7 @@ export const fetchExerciseSetHistory = async (definitionId: string): Promise<Exe
 };
 
 export const fetchPerformancePeek = async (
-  definitionId: string, 
+  definitionId: string,
   sessionWorkoutId?: string,
   studentId?: string
 ): Promise<PerformancePeekData> => {
@@ -203,7 +203,7 @@ export const fetchPerformancePeek = async (
 const reorderSetsInternal = async (exerciseId: string) => {
   const { data: sets, error } = await supabase
     .from('sets')
-    .select('id, set_type, performed_at, created_at') 
+    .select('id, set_type, performed_at, created_at')
     .eq('exercise_id', exerciseId)
     .is('parent_set_id', null); // Ignora sub-sets de drop
 
@@ -213,7 +213,7 @@ const reorderSetsInternal = async (exerciseId: string) => {
     // Regra 1: Warmup sempre antes de qualquer outro tipo
     const aIsWarmup = a.set_type === 'warmup';
     const bIsWarmup = b.set_type === 'warmup';
-    
+
     if (aIsWarmup && !bIsWarmup) return -1;
     if (!aIsWarmup && bIsWarmup) return 1;
 
@@ -231,7 +231,8 @@ export interface SubSetPayload { weight: number; reps: number; }
 
 interface SaveSetParams {
   exercise_id: string; set_number: number; weight: number; reps: number; rpe?: number;
-  observations?: string; side?: 'E' | 'D' | null; set_type: SetType; subSets?: SubSetPayload[]; 
+  observations?: string; side?: 'E' | 'D' | null; set_type: SetType; subSets?: SubSetPayload[];
+  music_data?: any;
 }
 
 export const saveComplexSet = async (params: SaveSetParams): Promise<WorkoutSet> => {
@@ -245,7 +246,8 @@ export const saveComplexSet = async (params: SaveSetParams): Promise<WorkoutSet>
       rpe: params.rpe,
       observations: params.observations,
       side: params.side,
-      set_type: params.set_type
+      set_type: params.set_type,
+      music_data: params.music_data
     })
     .select('*')
     .single();
@@ -255,11 +257,11 @@ export const saveComplexSet = async (params: SaveSetParams): Promise<WorkoutSet>
   if (params.subSets && params.subSets.length > 0) {
     const subSetsToInsert = params.subSets.map(sub => ({
       exercise_id: params.exercise_id,
-      set_number: parentSet.set_number, 
+      set_number: parentSet.set_number,
       weight: sub.weight,
       reps: sub.reps,
-      set_type: params.set_type, 
-      parent_set_id: parentSet.id 
+      set_type: params.set_type,
+      parent_set_id: parentSet.id
     }));
     await supabase.from('sets').insert(subSetsToInsert);
   }
@@ -272,12 +274,12 @@ export const saveSuperSet = async (items: any[], setType: SetType) => {
   const superSetId = generateUUID();
   const setsToInsert = items.map(item => ({
     exercise_id: item.exercise_id,
-    set_number: 999, 
+    set_number: 999,
     weight: item.weight,
     reps: item.reps,
     set_type: setType,
     super_set_id: superSetId,
-    side: item.side 
+    side: item.side
   }));
 
   const { data, error } = await supabase.from('sets').insert(setsToInsert).select();
@@ -289,7 +291,7 @@ export const saveSuperSet = async (items: any[], setType: SetType) => {
 };
 
 export const saveSet = async (data: any) => {
-    return saveComplexSet({ ...data, set_type: data.set_type || 'normal', subSets: data.subSets || [] });
+  return saveComplexSet({ ...data, set_type: data.set_type || 'normal', subSets: data.subSets || [] });
 }
 
 export const updateSet = async (setId: string, updates: Partial<WorkoutSet>) => {
@@ -322,7 +324,7 @@ export const reorderWorkoutExercises = async (updates: { id: string; order: numb
 // ============================================================
 
 export const instantiateTemplateInWorkout = async (
-  workoutId: string, 
+  workoutId: string,
   plannedExercises: PlannedExercise[]
 ) => {
   if (!plannedExercises || plannedExercises.length === 0) return;
@@ -331,11 +333,11 @@ export const instantiateTemplateInWorkout = async (
 
   for (let index = 0; index < plannedExercises.length; index++) {
     const plan = plannedExercises[index];
-    
+
     // Detecção de Unilateralidade
     const lowerName = plan.definition_name?.toLowerCase() || '';
-    const isUnilateral = plan.is_unilateral 
-      || lowerName.includes('unilateral') 
+    const isUnilateral = plan.is_unilateral
+      || lowerName.includes('unilateral')
       || lowerName.includes('uni ');
 
     // 1. Cria a instância do exercício (COPIANDO NOTES E VIDEO)
@@ -345,8 +347,8 @@ export const instantiateTemplateInWorkout = async (
         workout_id: workoutId,
         definition_id: plan.definition_id,
         order_in_workout: index,
-        notes: plan.notes || null,         
-        video_url: plan.video_url || null, 
+        notes: plan.notes || null,
+        video_url: plan.video_url || null,
         is_unilateral: isUnilateral
       })
       .select('id')
@@ -354,7 +356,7 @@ export const instantiateTemplateInWorkout = async (
 
     if (exError) {
       console.error('Erro ao instanciar exercício:', exError);
-      continue; 
+      continue;
     }
 
     const count = plan.sets_count || 3;
@@ -411,7 +413,7 @@ export const autoClassifyExistingExercises = async (forceAll = false) => {
   while (hasMore) {
     let query = supabase.from('exercise_definitions').select('id, name');
     if (!forceAll) query = query.is('tags', null);
-    const { data: exercises } = await query.limit(10); 
+    const { data: exercises } = await query.limit(10);
     if (!exercises || exercises.length === 0) { hasMore = false; break; }
     const promises = exercises.map(async (ex) => {
       const classification = await classifyAndAuditExercise(ex.name);
@@ -423,7 +425,7 @@ export const autoClassifyExistingExercises = async (forceAll = false) => {
     });
     const results = await Promise.all(promises);
     processedCount += results.reduce((a: number, b: number) => a + b, 0);
-    if (exercises.length < 10 || processedCount >= 500) hasMore = false; 
+    if (exercises.length < 10 || processedCount >= 500) hasMore = false;
   }
   return processedCount;
 };

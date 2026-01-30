@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { 
-  Modal, View, Text, StyleSheet, TouchableOpacity, 
-  TextInput, ActivityIndicator, ScrollView, Alert 
+import {
+  Modal, View, Text, StyleSheet, TouchableOpacity,
+  TextInput, ActivityIndicator, ScrollView, Alert
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
@@ -23,11 +23,11 @@ interface Props {
 
 export default function SessionFeedbackModal({ visible, workoutId, config, onClose, onSuccess }: Props) {
   const [loading, setLoading] = useState(false);
-  
+
   // Estados do Formulário
   const [rpe, setRpe] = useState(5); // 0-10
   const [comment, setComment] = useState('');
-  
+
   // DALDA simplificado (Key: Valor -1, 0, 1)
   const [dalda, setDalda] = useState<Record<string, number>>({
     'sono': 0, 'energia': 0, 'dor_muscular': 0, 'estresse': 0
@@ -77,15 +77,15 @@ export default function SessionFeedbackModal({ visible, workoutId, config, onClo
       <Text style={styles.daldaLabel}>{label}</Text>
       <View style={styles.daldaOptions}>
         {[-1, 0, 1].map((val) => (
-          <TouchableOpacity 
-            key={val} 
-            style={[styles.daldaBtn, dalda[key] === val && styles.daldaBtnActive(val)]}
-            onPress={() => setDalda(prev => ({...prev, [key]: val}))}
+          <TouchableOpacity
+            key={val}
+            style={[styles.daldaBtn, dalda[key] === val && daldaBtnActive(val)]}
+            onPress={() => setDalda(prev => ({ ...prev, [key]: val }))}
           >
-            <Feather 
-              name={val === -1 ? 'thumbs-down' : val === 1 ? 'thumbs-up' : 'minus'} 
-              size={16} 
-              color={dalda[key] === val ? '#FFF' : '#A0AEC0'} 
+            <Feather
+              name={val === -1 ? 'thumbs-down' : val === 1 ? 'thumbs-up' : 'minus'}
+              size={16}
+              color={dalda[key] === val ? '#FFF' : '#A0AEC0'}
             />
           </TouchableOpacity>
         ))}
@@ -102,7 +102,7 @@ export default function SessionFeedbackModal({ visible, workoutId, config, onClo
         </View>
 
         <ScrollView contentContainerStyle={styles.content}>
-          
+
           {/* 1. PSE / RPE (Slider) */}
           {(config?.collect_rpe ?? true) && ( // Default true se config for null (treino livre)
             <View style={styles.section}>
@@ -111,7 +111,7 @@ export default function SessionFeedbackModal({ visible, workoutId, config, onClo
                 <Text style={styles.rpeValue}>{rpe}</Text>
               </View>
               <Slider
-                style={{width: '100%', height: 40}}
+                style={{ width: '100%', height: 40 }}
                 minimumValue={0}
                 maximumValue={10}
                 step={0.5}
@@ -133,7 +133,7 @@ export default function SessionFeedbackModal({ visible, workoutId, config, onClo
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Prontidão & Recuperação</Text>
               <Text style={styles.subText}>Comparado ao seu normal:</Text>
-              <View style={{marginTop: 12, gap: 12}}>
+              <View style={{ marginTop: 12, gap: 12 }}>
                 {renderDaldaItem('sono', 'Qualidade do Sono')}
                 {renderDaldaItem('energia', 'Nível de Energia')}
                 {renderDaldaItem('dor_muscular', 'Dor Muscular')}
@@ -150,7 +150,7 @@ export default function SessionFeedbackModal({ visible, workoutId, config, onClo
                 style={styles.input}
                 placeholder="Sua resposta..."
                 value={customAnswers[q] || ''}
-                onChangeText={(t) => setCustomAnswers(prev => ({...prev, [q]: t}))}
+                onChangeText={(t) => setCustomAnswers(prev => ({ ...prev, [q]: t }))}
               />
             </View>
           ))}
@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#FFF', borderBottomWidth: 1, borderColor: '#E2E8F0' },
   title: { fontSize: 20, fontWeight: '800', color: '#2D3748' },
   content: { padding: 20, paddingBottom: 40 },
-  
+
   section: { marginBottom: 24, backgroundColor: '#FFF', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0' },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: '#4A5568', marginBottom: 4 },
   labelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -197,9 +197,7 @@ const styles = StyleSheet.create({
   daldaOptions: { flexDirection: 'row', gap: 8 },
   daldaBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EDF2F7' },
   // Função helper para estilo dinâmico
-  daldaBtnActive: (val: number) => ({
-    backgroundColor: val === -1 ? '#FC8181' : val === 1 ? '#68D391' : '#CBD5E0'
-  }),
+
 
   input: { backgroundColor: '#F7FAFC', borderWidth: 1, borderColor: '#CBD5E0', borderRadius: 8, padding: 12, fontSize: 15, marginTop: 8 },
   textArea: { height: 80, textAlignVertical: 'top' },
@@ -207,4 +205,9 @@ const styles = StyleSheet.create({
   footer: { padding: 20, backgroundColor: '#FFF', borderTopWidth: 1, borderColor: '#E2E8F0' },
   saveButton: { backgroundColor: '#007AFF', padding: 16, borderRadius: 12, alignItems: 'center' },
   saveText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 }
+});
+
+// Função helper para estilo dinâmico
+const daldaBtnActive = (val: number) => ({
+  backgroundColor: val === -1 ? '#FC8181' : val === 1 ? '#68D391' : '#CBD5E0'
 });
