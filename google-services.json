@@ -1,0 +1,62 @@
+{
+  "project_info": {
+    "project_number": "541381977382",
+    "project_id": "logbook-edf",
+    "storage_bucket": "logbook-edf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:541381977382:android:6738e5e7a4fcb4788ccde7",
+        "android_client_info": {
+          "package_name": "com.mayconmatias.logbookedf"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "541381977382-4aolgto3ngpk35ab796un92eat0avi7a.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mayconmatias.logbookedf",
+            "certificate_hash": "fb3f9441951408361977b1be27d6adb768a3d1f2"
+          }
+        },
+        {
+          "client_id": "541381977382-iuphilvmla66kjosqdpdrgkg05rbbk78.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mayconmatias.logbookedf",
+            "certificate_hash": "8ec267c7a3b4841c4d139d37536790b532df6951"
+          }
+        },
+        {
+          "client_id": "541381977382-4gl9sv2hi6ntq56vt7tf5gnd31eqfigd.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCNUuQ24HpUOj-1KDdV_qFtitnQ0HYX2EU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "541381977382-4gl9sv2hi6ntq56vt7tf5gnd31eqfigd.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "541381977382-fj4itntgeofla5l7h31saqb7bq4lsdru.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.mayconmatias.logbookedf"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

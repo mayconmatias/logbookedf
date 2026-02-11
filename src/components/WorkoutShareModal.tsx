@@ -298,7 +298,7 @@ export default function WorkoutShareModal({
               weightPRs={weightPRs}
               bgOpacity={bgOpacity}
               fullScreen={fullScreen}
-              musicVisibility={musicVisibility}
+              musicVisibility={'none' as any} // musicVisibility
               textColor={textColor}
               musicColor={musicColor}
               colors={selectedTheme.colors}
@@ -451,7 +451,7 @@ export default function WorkoutShareModal({
             </View>
 
             {/* MUSIC COLORS */}
-            <View style={styles.controlsRow}>
+            {/* <View style={styles.controlsRow}>
               <Text style={styles.label}>Cor da Música</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                 {TEXT_COLORS.map(tc => (
@@ -470,7 +470,7 @@ export default function WorkoutShareModal({
                     {musicColor === tc.color && <Feather name="check" size={14} color={tc.id === 'white' ? '#000' : '#FFF'} />}
                   </TouchableOpacity>
                 ))}
-                {/* Spotify Green Option */}
+                
                 <TouchableOpacity
                   onPress={() => {
                     setMusicColor('#1DB954');
@@ -485,10 +485,10 @@ export default function WorkoutShareModal({
                   {musicColor === '#1DB954' && <Feather name="check" size={14} color="#FFF" />}
                 </TouchableOpacity>
               </ScrollView>
-            </View>
+            </View> */}
 
             {/* MUSIC POLICY */}
-            <View style={styles.controlsRow}>
+            {/* <View style={styles.controlsRow}>
               <Text style={styles.label}>Trilha Sonora</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.policyContainer}>
                 {MUSIC_VISIBILITY_OPTIONS.map(opt => (
@@ -510,7 +510,7 @@ export default function WorkoutShareModal({
                   </TouchableOpacity>
                 ))}
               </ScrollView>
-            </View>
+            </View> */}
           </ScrollView>
         </Animated.View>
       </View>

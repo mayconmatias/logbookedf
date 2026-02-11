@@ -13,6 +13,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import './src/i18n/index.ts';
 
 import { TimerProvider } from '@/context/TimerContext';
+import { TutorialProvider } from '@/context/TutorialContext';
 import RestTimer from '@/components/RestTimer';
 import * as Notifications from 'expo-notifications';
 import BiometricGate from '@/components/BiometricGate';
@@ -195,8 +196,9 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
           <TimerProvider>
-            <BiometricGate sessionActive={!!session && !isPasswordRecovery}>
-              <NavigationContainer linking={linking} ref={navigationRef}>
+            <TutorialProvider>
+              <BiometricGate sessionActive={!!session && !isPasswordRecovery}>
+                <NavigationContainer linking={linking} ref={navigationRef}>
                 {session ? (
                    isPasswordRecovery ? (
                       <Stack.Navigator>
@@ -264,7 +266,7 @@ export default function App() {
               {session && !isPasswordRecovery && <RestTimer />}
               <Toaster />
             </BiometricGate>
-            
+            </TutorialProvider>
           </TimerProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

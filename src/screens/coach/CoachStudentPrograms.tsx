@@ -16,14 +16,15 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RootStackParamList } from '@/types/navigation';
 import { Program } from '@/types/coaching';
-import { 
-  fetchStudentPrograms, 
-  createProgram, 
-  setProgramActive, 
-  renameProgram, 
+import {
+  fetchStudentPrograms,
+  createProgram,
+  setProgramActive,
+  renameProgram,
   deleteProgram,
   // [NOVO] Importações
   fetchCoachTemplates,
@@ -35,7 +36,8 @@ type Props = NativeStackScreenProps<RootStackParamList, 'CoachStudentPrograms'>;
 
 export default function CoachStudentPrograms({ navigation, route }: Props) {
   const { studentId, studentName } = route.params;
-  
+  const insets = useSafeAreaInsets();
+
   // Lista de programas do ALUNO
   const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +74,13 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
     }, [loadPrograms])
   );
 
+  // --- [NOVO] Estados para o Modal de Input (Substituto do Alert.prompt) ---
+  const [inputModalVisible, setInputModalVisible] = useState(false);
+  const [inputModalTitle, setInputModalTitle] = useState('');
+  const [inputModalValue, setInputModalValue] = useState('');
+  const [inputModalPlaceholder, setInputModalPlaceholder] = useState('');
+  const [onInputConfirm, setOnInputConfirm] = useState<((text: string) => Promise<void>) | null>(null);
+
   // --- AÇÃO: ABRIR MODAL DE TEMPLATES ---
   const handleOpenTemplateModal = async () => {
     setIsTemplateModalVisible(true);
@@ -92,8 +101,8 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
       `Deseja criar um novo programa para ${studentName} usando "${template.name}" como base?`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Confirmar', 
+        {
+          text: 'Confirmar',
           onPress: async () => {
             try {
               setIsTemplateModalVisible(false);
@@ -113,28 +122,21 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
 
   // --- OUTRAS AÇÕES (Mantidas) ---
   const handleCreateProgram = () => {
-    Alert.prompt(
-      'Novo Programa (Vazio)',
-      'Nome do programa (ex: Hipertrofia A):',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Criar', 
-          onPress: async (name?: string) => {
-            if (!name || !name.trim()) return;
-            setLoading(true);
-            try {
-              await createProgram(studentId, name);
-              await loadPrograms();
-            } catch (e: any) {
-              Alert.alert('Erro', e.message);
-              setLoading(false);
-            }
-          }
-        }
-      ],
-      'plain-text'
-    );
+    setInputModalTitle('Novo Programa (Vazio)');
+    setInputModalPlaceholder('Nome do programa (ex: Hipertrofia A)');
+    setInputModalValue('');
+    setOnInputConfirm(() => async (name: string) => {
+      if (!name || !name.trim()) return;
+      setLoading(true);
+      try {
+        await createProgram(studentId, name);
+        await loadPrograms();
+      } catch (e: any) {
+        Alert.alert('Erro', e.message);
+        setLoading(false);
+      }
+    });
+    setInputModalVisible(true);
   };
 
   const handleCreateProgramWithAI = async () => {
@@ -168,8 +170,8 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
       program.name,
       'Opções do Programa:',
       [
-        { 
-          text: program.is_active ? 'Já está Ativo' : 'Tornar Ativo', 
+        {
+          text: program.is_active ? 'Já está Ativo' : 'Tornar Ativo',
           onPress: async () => {
             if (program.is_active) return;
             setLoading(true);
@@ -177,36 +179,39 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
               await setProgramActive(program.id);
               await loadPrograms();
               Alert.alert('Sucesso', 'Programa ativado!');
-            } catch(e: any) { Alert.alert('Erro', e.message); setLoading(false); }
+            } catch (e: any) { Alert.alert('Erro', e.message); setLoading(false); }
           }
         },
-        { 
-          text: 'Renomear', 
+        {
+          text: 'Renomear',
           onPress: () => {
-             Alert.prompt('Renomear', 'Novo nome:', [
-               { text: 'Cancelar', style: 'cancel' },
-               { text: 'Salvar', onPress: async (n?: string) => {
-                  if(!n || !n.trim()) return;
-                  setLoading(true);
-                  await renameProgram(program.id, n);
-                  loadPrograms();
-               }}
-             ], 'plain-text', program.name);
-          } 
+            setInputModalTitle('Renomear');
+            setInputModalPlaceholder('Novo nome');
+            setInputModalValue(program.name);
+            setOnInputConfirm(() => async (n: string) => {
+              if (!n || !n.trim()) return;
+              setLoading(true);
+              await renameProgram(program.id, n);
+              loadPrograms();
+            });
+            setInputModalVisible(true);
+          }
         },
-        { 
-          text: 'Excluir', 
-          style: 'destructive', 
+        {
+          text: 'Excluir',
+          style: 'destructive',
           onPress: () => {
-             Alert.alert('Tem certeza?', 'Isso apagará o programa.', [
-               { text: 'Cancelar', style: 'cancel' },
-               { text: 'Apagar', style: 'destructive', onPress: async () => {
+            Alert.alert('Tem certeza?', 'Isso apagará o programa.', [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Apagar', style: 'destructive', onPress: async () => {
                   setLoading(true);
                   await deleteProgram(program.id);
                   loadPrograms();
-               }}
-             ]);
-          } 
+                }
+              }
+            ]);
+          }
         },
         { text: 'Cancelar', style: 'cancel' }
       ]
@@ -214,7 +219,7 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} size="large" color="#007AFF" />
       ) : (
@@ -230,34 +235,34 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
             </View>
           }
           renderItem={({ item }) => (
-            <TouchableOpacity 
-                style={[styles.card, item.is_active && styles.activeCard]}
-                onPress={() => navigation.navigate('CoachProgramDetails', { program: item })}
-                onLongPress={() => handleOptions(item)}
-                delayLongPress={300}
-                activeOpacity={0.7}
+            <TouchableOpacity
+              style={[styles.card, item.is_active && styles.activeCard]}
+              onPress={() => navigation.navigate('CoachProgramDetails', { program: item })}
+              onLongPress={() => handleOptions(item)}
+              delayLongPress={300}
+              activeOpacity={0.7}
             >
-                <View style={styles.cardHeader}>
-                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1}}>
-                    <Feather name={item.is_active ? "check-circle" : "folder"} size={20} color={item.is_active ? "#007AFF" : "#718096"} />
-                    <Text style={[styles.programName, item.is_active && { color: '#007AFF' }]}>{item.name}</Text>
-                  </View>
-                  {item.is_active && <View style={styles.badge}><Text style={styles.badgeText}>ATIVO</Text></View>}
+              <View style={styles.cardHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <Feather name={item.is_active ? "check-circle" : "folder"} size={20} color={item.is_active ? "#007AFF" : "#718096"} />
+                  <Text style={[styles.programName, item.is_active && { color: '#007AFF' }]}>{item.name}</Text>
                 </View>
-                <View style={styles.cardFooter}>
-                  <Text style={styles.date}>Criado em {new Date(item.created_at).toLocaleDateString('pt-BR')}</Text>
-                  <Feather name="chevron-right" size={20} color="#CBD5E0" />
-                </View>
+                {item.is_active && <View style={styles.badge}><Text style={styles.badgeText}>ATIVO</Text></View>}
+              </View>
+              <View style={styles.cardFooter}>
+                <Text style={styles.date}>Criado em {new Date(item.created_at).toLocaleDateString('pt-BR')}</Text>
+                <Feather name="chevron-right" size={20} color="#CBD5E0" />
+              </View>
             </TouchableOpacity>
           )}
         />
       )}
 
       {/* --- FABs --- */}
-      
+
       {/* Botão Template (Verde) */}
-      <TouchableOpacity 
-        style={[styles.fab, styles.fabTemplate]} 
+      <TouchableOpacity
+        style={[styles.fab, styles.fabTemplate]}
         onPress={handleOpenTemplateModal}
       >
         <Feather name="copy" size={24} color="#FFF" />
@@ -265,8 +270,8 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
       </TouchableOpacity>
 
       {/* Botão IA (Roxo) */}
-      <TouchableOpacity 
-        style={[styles.fab, styles.fabAi]} 
+      <TouchableOpacity
+        style={[styles.fab, styles.fabAi]}
         onPress={() => setIsAiModalVisible(true)}
       >
         <Feather name="cpu" size={24} color="#FFF" />
@@ -283,58 +288,100 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
       {/* --- MODAL TEMPLATES --- */}
       <Modal visible={isTemplateModalVisible} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalContainer}>
-           <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Meus Templates</Text>
-              <TouchableOpacity onPress={() => setIsTemplateModalVisible(false)}>
-                <Text style={styles.closeText}>Cancelar</Text>
-              </TouchableOpacity>
-           </View>
-           
-           {loadingTemplates ? (
-             <ActivityIndicator style={{marginTop: 40}} size="large" color="#007AFF" />
-           ) : (
-             <FlatList 
-               data={myTemplates}
-               keyExtractor={item => item.id}
-               contentContainerStyle={{padding: 16}}
-               ListEmptyComponent={<Text style={styles.emptyTextModal}>Você não possui templates. Crie um programa e marque como template ou compre na loja.</Text>}
-               renderItem={({ item }) => (
-                 <TouchableOpacity style={styles.templateCard} onPress={() => handleSelectTemplate(item)}>
-                    <View style={styles.iconBoxTemplate}>
-                       <Feather name="layers" size={24} color="#38A169" />
-                    </View>
-                    <View style={{flex: 1}}>
-                       <Text style={styles.templateTitle}>{item.name}</Text>
-                       <Text style={styles.templateSub}>Toque para aplicar</Text>
-                    </View>
-                    <Feather name="arrow-right-circle" size={24} color="#CBD5E0" />
-                 </TouchableOpacity>
-               )}
-             />
-           )}
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Meus Templates</Text>
+            <TouchableOpacity onPress={() => setIsTemplateModalVisible(false)}>
+              <Text style={styles.closeText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+
+          {loadingTemplates ? (
+            <ActivityIndicator style={{ marginTop: 40 }} size="large" color="#007AFF" />
+          ) : (
+            <FlatList
+              data={myTemplates}
+              keyExtractor={item => item.id}
+              contentContainerStyle={{ padding: 16 }}
+              ListEmptyComponent={<Text style={styles.emptyTextModal}>Você não possui templates. Crie um programa e marque como template ou compre na loja.</Text>}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.templateCard} onPress={() => handleSelectTemplate(item)}>
+                  <View style={styles.iconBoxTemplate}>
+                    <Feather name="layers" size={24} color="#38A169" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.templateTitle}>{item.name}</Text>
+                    <Text style={styles.templateSub}>Toque para aplicar</Text>
+                  </View>
+                  <Feather name="arrow-right-circle" size={24} color="#CBD5E0" />
+                </TouchableOpacity>
+              )}
+            />
+          )}
         </View>
       </Modal>
 
       {/* --- MODAL IA --- */}
       <Modal visible={isAiModalVisible} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalContainer}>
-           <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Criar com IA</Text>
-              <TouchableOpacity onPress={() => setIsAiModalVisible(false)}>
-                <Text style={styles.closeText}>Cancelar</Text>
-              </TouchableOpacity>
-           </View>
-           <View style={{padding: 16, flex: 1}}>
-              <Text style={styles.modalSub}>Cole o treino completo aqui...</Text>
-              <TextInput 
-                 style={styles.aiInput} multiline placeholder="Ex: Treino A: Peito..." 
-                 value={aiText} onChangeText={setAiText} autoFocus
-              />
-              <TouchableOpacity style={styles.aiButton} onPress={handleCreateProgramWithAI} disabled={aiLoading}>
-                 {aiLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.aiButtonText}>Gerar</Text>}
-              </TouchableOpacity>
-           </View>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Criar com IA</Text>
+            <TouchableOpacity onPress={() => setIsAiModalVisible(false)}>
+              <Text style={styles.closeText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={{ padding: 16, flex: 1 }}>
+            <Text style={styles.modalSub}>Cole o treino completo aqui...</Text>
+            <TextInput
+              style={styles.aiInput} multiline placeholder="Ex: Treino A: Peito..."
+              value={aiText} onChangeText={setAiText} autoFocus
+            />
+            <TouchableOpacity style={styles.aiButton} onPress={handleCreateProgramWithAI} disabled={aiLoading}>
+              {aiLoading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.aiButtonText}>Gerar</Text>}
+            </TouchableOpacity>
+          </View>
         </View>
+      </Modal>
+
+      {/* --- MODAL INPUT (Custom Alert.prompt) --- */}
+      <Modal visible={inputModalVisible} transparent animationType="fade">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}
+        >
+          <View style={{ backgroundColor: '#FFF', borderRadius: 12, padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 8, color: '#2D3748' }}>{inputModalTitle}</Text>
+
+            <TextInput
+              style={{
+                borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 12,
+                fontSize: 16, marginBottom: 20, backgroundColor: '#F7FAFC'
+              }}
+              placeholder={inputModalPlaceholder}
+              value={inputModalValue}
+              onChangeText={setInputModalValue}
+              autoFocus
+              onSubmitEditing={() => {
+                setInputModalVisible(false);
+                if (onInputConfirm) onInputConfirm(inputModalValue);
+              }}
+            />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+              <TouchableOpacity onPress={() => setInputModalVisible(false)} style={{ padding: 10 }}>
+                <Text style={{ color: '#718096', fontWeight: 'bold' }}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setInputModalVisible(false);
+                  if (onInputConfirm) onInputConfirm(inputModalValue);
+                }}
+                style={{ backgroundColor: '#007AFF', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
+              >
+                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Salvar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
     </View>
@@ -343,7 +390,7 @@ export default function CoachStudentPrograms({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7FAFC', padding: 16 },
-  
+
   card: { backgroundColor: '#FFF', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
   activeCard: { borderColor: '#007AFF', backgroundColor: '#F0F9FF' },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },

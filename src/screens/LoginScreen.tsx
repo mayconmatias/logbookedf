@@ -6,55 +6,64 @@ import {
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Feather } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
+import { 
+  GoogleSignin, 
+  statusCodes 
+} from '@react-native-google-signin/google-signin';
 
 import type { RootStackParamList } from "@/types/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import t from "@/i18n/pt";
 
-// Garante que o navegador feche corretamente após o login
-WebBrowser.maybeCompleteAuthSession();
+// Configura o Google Sign In Nativo (Inicia uma vez fora do componente)
+GoogleSignin.configure({
+  scopes: ['https://www.googleapis.com/auth/userinfo.email'],
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID, // DO WEB, NÃO DO ANDROID
+  offlineAccess: false,
+});
 
 export default function LoginScreen({ navigation }: NativeStackScreenProps<RootStackParamList, "Login">) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // --- CONFIGURAÇÃO GOOGLE (PROFISSIONAL) ---
-  // Usando variáveis de ambiente com prefixo EXPO_PUBLIC_
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-  });
-
-  // --- LISTENER DO GOOGLE ---
+  // --- LOGIN GOOGLE (NATIVO & ROBUSTO) ---
   useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token } = response.params;
-      if (id_token) {
-        handleGoogleSignIn(id_token);
-      } else {
-        Alert.alert('Erro', 'Token do Google não recebido.');
-      }
-    } else if (response?.type === 'error') {
-      Alert.alert('Erro Google', 'Não foi possível conectar ao Google. Verifique sua conexão.');
-    }
-  }, [response]);
+    // Configura o Google Sign In ao montar o componente
+    GoogleSignin.configure({
+      scopes: ['https://www.googleapis.com/auth/userinfo.email'],
+      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      offlineAccess: false,
+    });
+  }, []);
 
-  const handleGoogleSignIn = async (idToken: string) => {
+  const handleGoogleSignIn = async () => {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithIdToken({
-        provider: 'google',
-        token: idToken,
-      });
+      await GoogleSignin.hasPlayServices();
+      const userInfo = await GoogleSignin.signIn();
       
-      if (error) throw error;
-      // O App.tsx vai detectar a sessão automaticamente
+      if (userInfo.data?.idToken) {
+        const { error } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: userInfo.data.idToken,
+        });
+
+        if (error) throw error;
+      } else {
+        throw new Error('No ID token present!');
+      }
     } catch (e: any) {
-      Alert.alert('Erro no Login Google', e.message);
+      if (e.code === statusCodes.SIGN_IN_CANCELLED) {
+        // Usuário cancelou
+      } else if (e.code === statusCodes.IN_PROGRESS) {
+        // Já está em processo
+      } else if (e.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        Alert.alert('Erro', 'Google Play Services indisponível.');
+      } else {
+        Alert.alert('Erro no Login Google', e.message);
+      }
+    } finally {
       setLoading(false);
     }
   };
@@ -173,8 +182,8 @@ export default function LoginScreen({ navigation }: NativeStackScreenProps<RootS
           
           <TouchableOpacity 
             style={styles.googleButton} 
-            onPress={() => promptAsync()}
-            disabled={!request}
+            onPress={handleGoogleSignIn}
+            disabled={loading}
           >
              <Feather name="chrome" size={24} color="#DB4437" /> 
              <Text style={styles.socialText}>Google</Text>

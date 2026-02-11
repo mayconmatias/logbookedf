@@ -221,7 +221,7 @@ export default function ProgressionShareModal({
                 bgOpacity={bgOpacity}
                 currentSessionTEV={currentSessionTEV}
                 colors={selectedTheme.colors}
-                music={(set as any)?.music_data}
+                music={undefined} // (set as any)?.music_data
                 textColor={textColor}
                 musicColor={musicColor}
                 borderRadius={borderRadius}
@@ -323,7 +323,7 @@ export default function ProgressionShareModal({
               </ScrollView>
             </View>
 
-            <View style={styles.controlsRow}>
+            {/* <View style={styles.controlsRow}>
               <Text style={styles.label}>Cor da Música</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                 {TEXT_COLORS.map(tc => (
@@ -339,7 +339,7 @@ export default function ProgressionShareModal({
                   {musicColor === '#1DB954' && <Feather name="check" size={14} color="#FFF" />}
                 </TouchableOpacity>
               </ScrollView>
-            </View>
+            </View> */}
           </ScrollView>
         </Animated.View>
       </View>

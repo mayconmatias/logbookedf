@@ -32,7 +32,7 @@ import { checkPlanValidity } from '@/utils/date';
 import { syncStravaActivities } from '@/services/strava.service';
 
 // [NOVO] Import do Tutorial
-import { OnboardingTour } from '@/components/OnboardingTour';
+import { TutorialModal } from '@/components/TutorialModal';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -328,7 +328,7 @@ export default function Home({ navigation }: HomeProps) {
 
   return (
     <ScrollView
-      contentContainerStyle={[styles.container, { paddingBottom: 80 + insets.bottom }]}
+      contentContainerStyle={[styles.container, { paddingBottom: 80 + insets.bottom, paddingTop: 10 + insets.top }]}
       showsVerticalScrollIndicator={false}
     >
       <StatusBar barStyle="dark-content" />
@@ -484,10 +484,11 @@ export default function Home({ navigation }: HomeProps) {
 
       </View>
 
-      {/* --- ONBOARDING TOUR (MODAL) --- */}
-      <OnboardingTour
-        visible={showOnboarding}
-        onClose={() => setShowOnboarding(false)}
+      <TutorialModal
+        tutorialKey="home_screen"
+        title="Bem-vindo ao Logbook!"
+        description="Esta é sua tela principal. Aqui você vê seu resumo da semana, avisos do treinador e os atalhos para começar um treino."
+        icon="home-outline"
       />
 
       <View style={{ height: 40 }} />

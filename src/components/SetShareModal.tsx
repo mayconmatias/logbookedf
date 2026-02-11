@@ -266,7 +266,7 @@ export default function SetShareModal({
                   getDaysAgo={getDaysAgo}
                   prKind={prKind}
                   bgOpacity={bgOpacity}
-                  music={(set as any)?.music_data}
+                  music={undefined} // (set as any)?.music_data
                   colors={selectedTheme.colors}
                   textColor={textColor}
                   musicColor={musicColor}
@@ -372,7 +372,7 @@ export default function SetShareModal({
               </ScrollView>
             </View>
 
-            <View style={styles.controlsRow}>
+            {/* <View style={styles.controlsRow}>
               <Text style={styles.label}>Cor da Música</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                 {TEXT_COLORS.map(tc => (
@@ -388,7 +388,7 @@ export default function SetShareModal({
                   {musicColor === '#1DB954' && <Feather name="check" size={14} color="#FFF" />}
                 </TouchableOpacity>
               </ScrollView>
-            </View>
+            </View> */}
           </ScrollView>
         </Animated.View>
       </View>

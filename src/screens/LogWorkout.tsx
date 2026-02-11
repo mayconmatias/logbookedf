@@ -35,6 +35,7 @@ import SetShareModal from '@/components/SetShareModal';
 import ProgressionShareModal from '@/components/ProgressionShareModal';
 import { ExerciseFeedbackModal } from '@/components/ExerciseFeedbackModal';
 import SessionFeedbackModal from '@/components/SessionFeedbackModal';
+import { TutorialModal } from '@/components/TutorialModal'; // [NOVO]
 
 // Hooks, Contexto e Serviços
 import { useLogWorkoutController } from '@/hooks/useLogWorkoutController';
@@ -313,8 +314,8 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
           <>
             <WorkoutForm {...workoutFormProps} />
 
-            {/* [NOVO] Banner de Música Recente */}
-            {lastMusic && (
+            {/* [NOVO] Banner de Música Recente - OCULTADO */}
+            {/* {lastMusic && (
               <TouchableOpacity onPress={() => setIsPlaylistVisible(true)} activeOpacity={0.8}>
                 <View style={styles.musicBanner}>
                   <View style={styles.musicIconBadge}>
@@ -330,7 +331,7 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
                   <Feather name="list" size={16} color="#A0AEC0" style={{ marginLeft: 8 }} />
                 </View>
               </TouchableOpacity>
-            )}
+            )} */}
 
             <View style={styles.logContainer}>
               <Text style={styles.logTitle}>
@@ -430,6 +431,14 @@ export default function LogWorkoutScreen({ navigation, route }: Props) {
         visible={isPlaylistVisible}
         onClose={() => setIsPlaylistVisible(false)}
         tracks={playlist}
+      />
+
+      <TutorialModal 
+        tutorialKey="log_workout_screen"
+        title="Registrando o Treino"
+        description="Toque em (+) para adicionar exercícios. Durante o treino, use o Timer no topo caso precise descansar."
+        icon="fitness-outline"
+        delay={1000}
       />
 
     </KeyboardAvoidingView>

@@ -357,14 +357,14 @@ export const useLogWorkoutController = (params: { workoutId?: string; templateId
           finalRpe = 10;
         }
 
-        // [MÚSICA] Captura metadados do Spotify/Apple/Mock
+        // [MÚSICA] Ocultado temporariamente
         let musicTrack: MusicTrackInfo | undefined = undefined;
-        try {
-          const track = await getCurrentMusicTrack();
-          if (track) musicTrack = track;
-        } catch (err) {
-          console.log("Erro ao capturar música (silencioso):", err);
-        }
+        // try {
+        //   const track = await getCurrentMusicTrack();
+        //   if (track) musicTrack = track;
+        // } catch (err) {
+        //   console.log("Erro ao capturar música (silencioso):", err);
+        // }
 
         const commonData = {
           weight: wKg,
@@ -579,12 +579,12 @@ export const useLogWorkoutController = (params: { workoutId?: string; templateId
         let finalRpe = form.values.rpe ? safeParse(form.values.rpe) : undefined;
         if (finalRpe === undefined) finalRpe = 10;
 
-        // Música também na substituição
+        // Música também na substituição - Ocultado temporariamente
         let musicTrack: MusicTrackInfo | undefined = undefined;
-        try {
-          const track = await getCurrentMusicTrack();
-          if (track) musicTrack = track;
-        } catch (e) { }
+        // try {
+        //   const track = await getCurrentMusicTrack();
+        //   if (track) musicTrack = track;
+        // } catch (e) { }
 
         const setData = {
           weight: wKg,

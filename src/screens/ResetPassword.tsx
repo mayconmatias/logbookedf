@@ -160,4 +160,4 @@ const styles = StyleSheet.create({
   
   cancelButton: { marginTop: 20, alignItems: 'center', padding: 10 },
   cancelText: { color: '#E53E3E', fontSize: 15, fontWeight: '600' }
-});
+}); 

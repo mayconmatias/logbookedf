@@ -19,7 +19,7 @@ export default {
     ios: {
       supportsTablet: false,
       bundleIdentifier: "com.mayconmatias.logbookedf",
-      buildNumber: "11",
+      buildNumber: "20",
       usesAppleSignIn: true,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
@@ -39,7 +39,8 @@ export default {
     
     android: {
       package: "com.mayconmatias.logbookedf",
-      versionCode: 11,
+      versionCode: 20,
+      googleServicesFile: "./google-services.json", // Importante para o Login Google Nativo
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png", 
         backgroundColor: "#ffffff"
@@ -47,8 +48,6 @@ export default {
       permissions: [
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_EXTERNAL_STORAGE"
       ]
@@ -107,6 +106,7 @@ export default {
           }
         }
       ],
+      "@react-native-google-signin/google-signin",
       [
         "expo-updates",
         {

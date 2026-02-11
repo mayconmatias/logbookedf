@@ -139,12 +139,12 @@ const SetRow = memo(
               </Text>
             ) : null}
 
-            {/* [NOVO] Informação de Música Inline */}
-            {set.music_data && (
+            {/* [NOVO] Informação de Música Inline - OCULTADO */}
+            {/* {set.music_data && (
               <Text style={styles.musicText} numberOfLines={1}>
                 <Feather name="music" size={10} /> {set.music_data.track} <Text style={styles.artistText}>• {set.music_data.artist}</Text>
               </Text>
-            )}
+            )} */}
 
             {childSets.length > 0 && (
               <View style={styles.childrenContainer}>

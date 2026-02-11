@@ -7,6 +7,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Feather } from '@expo/vector-icons';
@@ -15,11 +19,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '@/lib/supabaseClient';
 import { RootStackParamList } from '@/types/navigation';
 import { Program } from '@/types/coaching';
-import { 
-  createProgram, 
-  setProgramActive, 
-  renameProgram, 
-  deleteProgram 
+import {
+  createProgram,
+  setProgramActive,
+  renameProgram,
+  deleteProgram
 } from '@/services/program.service';
 import { checkPlanValidity } from '@/utils/date';
 import { usePremiumAccess } from '@/hooks/usePremiumAccess'; // [NOVO]
@@ -43,7 +47,7 @@ export default function MyPrograms({ navigation }: Props) {
         .from('programs')
         .select('*')
         .eq('student_id', user.id)
-        .eq('is_template', false) 
+        .eq('is_template', false)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -78,6 +82,13 @@ export default function MyPrograms({ navigation }: Props) {
     });
   }, [navigation]);
 
+  // --- [NOVO] Estados para o Modal de Input ---
+  const [inputModalVisible, setInputModalVisible] = useState(false);
+  const [inputModalTitle, setInputModalTitle] = useState('');
+  const [inputModalValue, setInputModalValue] = useState('');
+  const [inputModalPlaceholder, setInputModalPlaceholder] = useState('');
+  const [onInputConfirm, setOnInputConfirm] = useState<((text: string) => Promise<void>) | null>(null);
+
   // --- AÇÕES ---
 
   const handleCreateProgram = () => {
@@ -88,45 +99,38 @@ export default function MyPrograms({ navigation }: Props) {
     // Se o usuário não puder criar, o hook já mostra o alerta (showModal = true por padrão)
     if (!canCreateProgram(myCount)) return;
 
-    Alert.prompt(
-      'Novo Programa',
-      `Dê um nome (ex: Hipertrofia A):`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Criar',
-          onPress: async (name?: string) => {
-            if (!name) return;
-            try {
-              setLoading(true);
-              const { data: { user } } = await supabase.auth.getUser();
-              if (!user) return;
+    setInputModalTitle('Novo Programa');
+    setInputModalPlaceholder('Nome do programa (ex: Hipertrofia A)');
+    setInputModalValue('');
+    setOnInputConfirm(() => async (name: string) => {
+      if (!name) return;
+      try {
+        setLoading(true);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
-              await createProgram(user.id, name);
-              Alert.alert('Sucesso', 'Programa criado! Toque nele para adicionar os treinos.');
-              loadMyPrograms();
-            } catch (e: any) {
-              // Tratamento específico se a trava do banco (SQL) for acionada
-              if (e.message && (e.message.includes('LIMIT_REACHED') || e.code === 'P0001')) {
-                 Alert.alert('Limite Atingido', 'Você atingiu o limite de programas gratuitos.');
-              } else {
-                 Alert.alert('Erro', e.message);
-              }
-            } finally {
-              setLoading(false);
-            }
-          },
-        },
-      ],
-      'plain-text'
-    );
+        await createProgram(user.id, name);
+        Alert.alert('Sucesso', 'Programa criado! Toque nele para adicionar os treinos.');
+        loadMyPrograms();
+      } catch (e: any) {
+        // Tratamento específico se a trava do banco (SQL) for acionada
+        if (e.message && (e.message.includes('LIMIT_REACHED') || e.code === 'P0001')) {
+          Alert.alert('Limite Atingido', 'Você atingiu o limite de programas gratuitos.');
+        } else {
+          Alert.alert('Erro', e.message);
+        }
+      } finally {
+        setLoading(false);
+      }
+    });
+    setInputModalVisible(true);
   };
 
   const handleActivate = async (program: Program) => {
     const validity = checkPlanValidity(program.starts_at, program.expires_at);
     if (validity !== 'active') {
-        Alert.alert('Atenção', 'Você não pode ativar um programa vencido ou futuro.');
-        return;
+      Alert.alert('Atenção', 'Você não pode ativar um programa vencido ou futuro.');
+      return;
     }
 
     try {
@@ -141,29 +145,21 @@ export default function MyPrograms({ navigation }: Props) {
   };
 
   const handleRename = (program: Program) => {
-    Alert.prompt(
-      'Renomear Programa',
-      'Digite o novo nome:',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Salvar',
-          onPress: async (newName?: string) => {
-            if (!newName || newName.trim() === '') return;
-            try {
-              setLoading(true);
-              await renameProgram(program.id, newName);
-              loadMyPrograms();
-            } catch (e: any) {
-              Alert.alert('Erro', e.message);
-              setLoading(false);
-            }
-          }
-        }
-      ],
-      'plain-text',
-      program.name
-    );
+    setInputModalTitle('Renomear Programa');
+    setInputModalPlaceholder('Digite o novo nome:');
+    setInputModalValue(program.name);
+    setOnInputConfirm(() => async (newName: string) => {
+      if (!newName || newName.trim() === '') return;
+      try {
+        setLoading(true);
+        await renameProgram(program.id, newName);
+        loadMyPrograms();
+      } catch (e: any) {
+        Alert.alert('Erro', e.message);
+        setLoading(false);
+      }
+    });
+    setInputModalVisible(true);
   };
 
   const handleDelete = (program: Program) => {
@@ -199,11 +195,11 @@ export default function MyPrograms({ navigation }: Props) {
 
     const validity = checkPlanValidity(program.starts_at, program.expires_at);
     if (!program.is_active && validity === 'active') {
-        options.unshift({ 
-            text: 'Tornar Ativo na Home', 
-            onPress: () => handleActivate(program),
-            style: 'default'
-        } as any);
+      options.unshift({
+        text: 'Tornar Ativo na Home',
+        onPress: () => handleActivate(program),
+        style: 'default'
+      } as any);
     }
 
     Alert.alert(program.name, 'Escolha uma opção:', options as any);
@@ -214,22 +210,22 @@ export default function MyPrograms({ navigation }: Props) {
     const isLocked = validity !== 'active';
 
     const handlePress = () => {
-        if (isLocked) {
-            const msg = validity === 'future' 
-                ? `Este programa inicia em ${new Date(item.starts_at!).toLocaleDateString()}.` 
-                : 'A vigência deste programa encerrou. Contate o treinador para renovar.';
-            Alert.alert('Acesso Bloqueado', msg);
-            return;
-        }
-        navigation.navigate('CoachProgramDetails', { program: item });
+      if (isLocked) {
+        const msg = validity === 'future'
+          ? `Este programa inicia em ${new Date(item.starts_at!).toLocaleDateString()}.`
+          : 'A vigência deste programa encerrou. Contate o treinador para renovar.';
+        Alert.alert('Acesso Bloqueado', msg);
+        return;
+      }
+      navigation.navigate('CoachProgramDetails', { program: item });
     };
 
     return (
       <TouchableOpacity
         style={[
-            styles.card, 
-            item.is_active && styles.activeCard,
-            isLocked && styles.lockedCard
+          styles.card,
+          item.is_active && styles.activeCard,
+          isLocked && styles.lockedCard
         ]}
         onPress={handlePress}
         onLongPress={() => handleLongPress(item)}
@@ -243,49 +239,49 @@ export default function MyPrograms({ navigation }: Props) {
               size={20}
               color={isLocked ? '#E53E3E' : (item.is_active ? '#007AFF' : '#718096')}
             />
-            <Text 
+            <Text
               style={[
-                  styles.programName, 
-                  item.is_active && styles.activeText,
-                  isLocked && styles.lockedText
-              ]} 
+                styles.programName,
+                item.is_active && styles.activeText,
+                isLocked && styles.lockedText
+              ]}
               numberOfLines={1}
             >
               {item.name}
             </Text>
           </View>
-          
+
           {item.is_active && !isLocked && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>ATIVO</Text>
             </View>
           )}
-          
+
           {isLocked && (
-             <View style={styles.lockedBadge}>
-                <Text style={styles.lockedBadgeText}>
-                    {validity === 'expired' ? 'VENCIDO' : 'FUTURO'}
-                </Text>
-             </View>
+            <View style={styles.lockedBadge}>
+              <Text style={styles.lockedBadgeText}>
+                {validity === 'expired' ? 'VENCIDO' : 'FUTURO'}
+              </Text>
+            </View>
           )}
         </View>
-        
+
         <View style={styles.footerRow}>
           <Text style={styles.date}>
             Criado: {new Date(item.created_at).toLocaleDateString('pt-BR')}
           </Text>
-          
+
           {item.origin_template_id ? (
             <Text style={styles.originTag}>Comprado</Text>
           ) : (
             <Text style={styles.selfTag}>Autoral</Text>
           )}
         </View>
-        
+
         {item.expires_at && (
-            <Text style={[styles.expiryText, isLocked && { color: '#E53E3E' }]}>
-                Vigência até: {new Date(item.expires_at).toLocaleDateString('pt-BR')}
-            </Text>
+          <Text style={[styles.expiryText, isLocked && { color: '#E53E3E' }]}>
+            Vigência até: {new Date(item.expires_at).toLocaleDateString('pt-BR')}
+          </Text>
         )}
 
       </TouchableOpacity>
@@ -318,13 +314,56 @@ export default function MyPrograms({ navigation }: Props) {
         <Feather name="plus" size={24} color="#FFF" />
         <Text style={styles.fabText}>Criar Programa</Text>
       </TouchableOpacity>
+
+      {/* --- MODAL INPUT (Custom Alert.prompt) --- */}
+      <Modal visible={inputModalVisible} transparent animationType="fade">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}
+        >
+          <View style={{ backgroundColor: '#FFF', borderRadius: 12, padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 8, color: '#2D3748' }}>{inputModalTitle}</Text>
+
+            <TextInput
+              style={{
+                borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 12,
+                fontSize: 16, marginBottom: 20, backgroundColor: '#F7FAFC'
+              }}
+              placeholder={inputModalPlaceholder}
+              value={inputModalValue}
+              onChangeText={setInputModalValue}
+              autoFocus
+              onSubmitEditing={() => {
+                setInputModalVisible(false);
+                if (onInputConfirm) onInputConfirm(inputModalValue);
+              }}
+            />
+
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+              <TouchableOpacity onPress={() => setInputModalVisible(false)} style={{ padding: 10 }}>
+                <Text style={{ color: '#718096', fontWeight: 'bold' }}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setInputModalVisible(false);
+                  if (onInputConfirm) onInputConfirm(inputModalValue);
+                }}
+                style={{ backgroundColor: '#007AFF', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
+              >
+                <Text style={{ color: '#FFF', fontWeight: 'bold' }}>Salvar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7FAFC', padding: 16 },
-  
+
   card: {
     backgroundColor: '#FFF',
     padding: 16,
@@ -339,7 +378,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   activeCard: { borderColor: '#007AFF', backgroundColor: '#F0F9FF' },
-  
+
   lockedCard: { backgroundColor: '#FFF5F5', borderColor: '#FEB2B2', opacity: 0.9 },
   lockedText: { color: '#9B2C2C', textDecorationLine: 'line-through' },
   lockedBadge: { backgroundColor: '#FEB2B2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
@@ -353,7 +392,7 @@ const styles = StyleSheet.create({
   },
   programName: { fontSize: 16, fontWeight: '700', color: '#2D3748', flex: 1, marginRight: 8 },
   activeText: { color: '#007AFF' },
-  
+
   badge: {
     backgroundColor: '#007AFF',
     paddingHorizontal: 8,
@@ -361,23 +400,23 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   badgeText: { color: '#FFF', fontSize: 10, fontWeight: 'bold' },
-  
+
   footerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 4,
-    marginLeft: 28 
+    marginLeft: 28
   },
   date: { fontSize: 12, color: '#718096' },
   originTag: { fontSize: 12, color: '#805AD5', fontWeight: '600' },
   selfTag: { fontSize: 12, color: '#38A169', fontStyle: 'italic' },
-  
+
   expiryText: {
-      fontSize: 11,
-      color: '#718096',
-      marginLeft: 28,
-      marginTop: 4,
-      fontStyle: 'italic'
+    fontSize: 11,
+    color: '#718096',
+    marginLeft: 28,
+    marginTop: 4,
+    fontStyle: 'italic'
   },
 
   emptyState: { alignItems: 'center', marginTop: 60, paddingHorizontal: 30 },
