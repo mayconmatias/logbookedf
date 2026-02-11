@@ -19,7 +19,7 @@ export default {
     ios: {
       supportsTablet: false,
       bundleIdentifier: "com.mayconmatias.logbookedf",
-      buildNumber: "20",
+      buildNumber: "21",
       usesAppleSignIn: true,
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
@@ -39,7 +39,7 @@ export default {
     
     android: {
       package: "com.mayconmatias.logbookedf",
-      versionCode: 20,
+      versionCode: 21,
       googleServicesFile: "./google-services.json", // Importante para o Login Google Nativo
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png", 
