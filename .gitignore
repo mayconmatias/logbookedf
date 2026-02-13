@@ -7,3 +7,32 @@ web-build/
 *.keystore
 .DS_Store*.aab
 *.apk
+
+# ======================================
+# SECRETS E CREDENCIAIS - NÃO COMMITAR
+# ======================================
+
+# Supabase
+.env.local
+.env.production
+*_service_role_key*
+
+# Apple Developer
+*.p8
+*.p12
+*.mobileprovision
+credentials.json
+credentials/
+
+# Banco de Dados
+*_connection_string*
+*.sql.backup
+
+# Chaves privadas
+*.pem
+*.key
+*_private_key*
+
+# SQL dumps antigos
+update*.sql
+
