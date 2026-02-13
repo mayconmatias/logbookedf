@@ -66,15 +66,69 @@ export default function ProgressionShareCard({
   feather = 0
 }: Props) {
   const [layout, setLayout] = useState({ width: 0, height: 0 });
+  
   const onLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
     setLayout({ width, height });
   };
 
+  // --- CÁLCULOS DO GRÁFICO (Movedo para antes dos retornos condicionais) ---
+  const { paths, lastPoint } = useMemo(() => {
+    if (!progression || progression.length === 0) return { paths: null, lastPoint: null };
+    
+    // Filtra valores inválidos
+    const cleanData = progression
+      .filter(p => typeof p.value === 'number' && !isNaN(p.value) && p.value > 0)
+      .map((p, i) => ({ x: i + 1, y: p.value }));
+
+    if (cleanData.length === 0) return { paths: null, lastPoint: null };
+
+    const historyData = cleanData.length === 1
+      ? [{ x: 1, y: cleanData[0].y }, { x: 2, y: cleanData[0].y }]
+      : cleanData;
+
+    const lastHistoricalValue = historyData[historyData.length - 1].y;
+    const currentTotal = lastHistoricalValue + currentSessionTEV;
+    const nextX = historyData.length + 1;
+
+    const redData = [...historyData, { x: nextX, y: currentTotal }];
+    const whiteData = [...historyData, { x: nextX, y: lastHistoricalValue }];
+
+    const xMax = nextX;
+    const yMax = currentTotal * 1.2;
+
+    const xScale = d3.scaleLinear().domain([1, xMax]).range([10, CHART_WIDTH - 10]);
+    const yScale = d3.scaleLinear().domain([0, yMax]).range([CHART_HEIGHT - PADDING_BOTTOM, PADDING_TOP]);
+
+    const areaGen = d3.area<{ x: number, y: number }>()
+      .x(d => xScale(d.x))
+      .y0(CHART_HEIGHT - PADDING_BOTTOM)
+      .y1(d => yScale(d.y))
+      .curve(d3.curveMonotoneX);
+
+    const redSVG = areaGen(redData);
+    const whiteSVG = areaGen(whiteData);
+
+    if (!redSVG || !whiteSVG) return { paths: null, lastPoint: null };
+
+    return {
+      paths: {
+        red: Skia.Path.MakeFromSVGString(redSVG),
+        white: Skia.Path.MakeFromSVGString(whiteSVG)
+      },
+      lastPoint: {
+        x: xScale(nextX),
+        y: yScale(currentTotal)
+      }
+    };
+  }, [progression, currentSessionTEV]);
+
   if (!set) return null;
 
   const hasProgression = progression && progression.length > 0;
-  const formattedTEV = `+${currentSessionTEV.toLocaleString('pt-BR')} kg`;
+  const formattedTEV = hasProgression 
+    ? `+${currentSessionTEV.toLocaleString('pt-BR')} kg`
+    : `${(set.weight * set.reps).toLocaleString('pt-BR')} kg`; // Fallback display logic
 
   // --- Caso SEM progressão (Card simples) ---
   if (!hasProgression) {
@@ -141,55 +195,9 @@ export default function ProgressionShareCard({
     );
   }
 
-  // --- CÁLCULOS DO GRÁFICO (Com progressão) ---
-  const { paths, lastPoint } = useMemo(() => {
-    const cleanData = progression
-      .filter(p => typeof p.value === 'number' && !isNaN(p.value) && p.value > 0)
-      .map((p, i) => ({ x: i + 1, y: p.value }));
-
-    if (cleanData.length === 0) return { paths: null, lastPoint: null };
-
-    const historyData = cleanData.length === 1
-      ? [{ x: 1, y: cleanData[0].y }, { x: 2, y: cleanData[0].y }]
-      : cleanData;
-
-    const lastHistoricalValue = historyData[historyData.length - 1].y;
-    const currentTotal = lastHistoricalValue + currentSessionTEV;
-    const nextX = historyData.length + 1;
-
-    const redData = [...historyData, { x: nextX, y: currentTotal }];
-    const whiteData = [...historyData, { x: nextX, y: lastHistoricalValue }];
-
-    const xMax = nextX;
-    const yMax = currentTotal * 1.2;
-
-    const xScale = d3.scaleLinear().domain([1, xMax]).range([10, CHART_WIDTH - 10]);
-    const yScale = d3.scaleLinear().domain([0, yMax]).range([CHART_HEIGHT - PADDING_BOTTOM, PADDING_TOP]);
-
-    const areaGen = d3.area<{ x: number, y: number }>()
-      .x(d => xScale(d.x))
-      .y0(CHART_HEIGHT - PADDING_BOTTOM)
-      .y1(d => yScale(d.y))
-      .curve(d3.curveMonotoneX);
-
-    const redSVG = areaGen(redData);
-    const whiteSVG = areaGen(whiteData);
-
-    if (!redSVG || !whiteSVG) return { paths: null, lastPoint: null };
-
-    return {
-      paths: {
-        red: Skia.Path.MakeFromSVGString(redSVG),
-        white: Skia.Path.MakeFromSVGString(whiteSVG)
-      },
-      lastPoint: {
-        x: xScale(nextX),
-        y: yScale(currentTotal)
-      }
-    };
-  }, [progression, currentSessionTEV]);
-
-  const totalVolumeStr = (progression[progression.length - 1].value + currentSessionTEV).toLocaleString('pt-BR');
+  const totalVolumeStr = hasProgression 
+    ? (progression[progression.length - 1].value + currentSessionTEV).toLocaleString('pt-BR')
+    : "0";
 
   return (
     <View

@@ -42,6 +42,12 @@ export default function CoachProgramDetails({ navigation, route }: Props) {
   const [aiText, setAiText] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
 
+  // --- ESTADOS DO MODAL DE CONFIGURAÇÕES/DATAS ---
+  const [isSettingsModalVisible, setIsSettingsModalVisible] = useState(false);
+  const [startsAt, setStartsAt] = useState(program.starts_at || '');
+  const [expiresAt, setExpiresAt] = useState(program.expires_at || '');
+  const [savingDates, setSavingDates] = useState(false);
+
   const loadWorkouts = async () => {
     try {
       const data = await fetchPlannedWorkouts(program.id);
@@ -60,6 +66,14 @@ export default function CoachProgramDetails({ navigation, route }: Props) {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: program.name,
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => setIsSettingsModalVisible(true)}
+          style={{ marginRight: 4 }}
+        >
+          <Feather name="settings" size={22} color="#007AFF" />
+        </TouchableOpacity>
+      ),
     });
   }, [navigation, program]);
 
@@ -129,6 +143,41 @@ export default function CoachProgramDetails({ navigation, route }: Props) {
         } 
       }
     ]);
+  };
+
+  // --- IA IMPORT ---
+
+  const handleSaveDates = async () => {
+    setSavingDates(true);
+    try {
+      const updates: any = {};
+      
+      if (startsAt) updates.starts_at = startsAt;
+      if (expiresAt) updates.expires_at = expiresAt;
+      
+      if (Object.keys(updates).length === 0) {
+        Alert.alert('Atenção', 'Nenhuma data foi alterada.');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('programs')
+        .update(updates)
+        .eq('id', program.id);
+
+      if (error) throw error;
+
+      Alert.alert('Sucesso', 'Datas atualizadas com sucesso!');
+      setIsSettingsModalVisible(false);
+      
+      // Atualizar o objeto program localmente
+      program.starts_at = startsAt || program.starts_at;
+      program.expires_at = expiresAt || program.expires_at;
+    } catch (e: any) {
+      Alert.alert('Erro', e.message);
+    } finally {
+      setSavingDates(false);
+    }
   };
 
   // --- IA IMPORT ---
@@ -351,6 +400,86 @@ export default function CoachProgramDetails({ navigation, route }: Props) {
         </View>
       </Modal>
 
+      {/* --- MODAL DE CONFIGURAÇÕES (DATAS) --- */}
+      <Modal
+        visible={isSettingsModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIsSettingsModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.settingsHeader}>
+              <Feather name="calendar" size={24} color="#007AFF" />
+              <Text style={styles.modalTitle}>Configurações do Programa</Text>
+            </View>
+            
+            <Text style={styles.modalDescription}>
+              Defina o período de validade deste programa de treino.
+            </Text>
+            
+            <View style={styles.dateSection}>
+              <Text style={styles.dateLabel}>Data de Início</Text>
+              <TextInput
+                style={styles.dateInput}
+                placeholder="AAAA-MM-DD (ex: 2026-02-13)"
+                placeholderTextColor="#999"
+                value={startsAt}
+                onChangeText={setStartsAt}
+              />
+              <Text style={styles.dateHint}>Quando o programa começa a valer</Text>
+            </View>
+
+            <View style={styles.dateSection}>
+              <Text style={styles.dateLabel}>Data de Vencimento</Text>
+              <TextInput
+                style={styles.dateInput}
+                placeholder="AAAA-MM-DD (ex: 2026-03-13)"
+                placeholderTextColor="#999"
+                value={expiresAt}
+                onChangeText={setExpiresAt}
+              />
+              <Text style={styles.dateHint}>Quando o programa expira (deixe vazio para sem vencimento)</Text>
+            </View>
+
+            <View style={styles.infoBox}>
+              <Feather name="info" size={16} color="#3182CE" />
+              <Text style={styles.infoText}>
+                Programas vencidos são bloqueados automaticamente para o aluno no app mobile.
+              </Text>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelButton]} 
+                onPress={() => setIsSettingsModalVisible(false)}
+                disabled={savingDates}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.confirmButton]} 
+                onPress={handleSaveDates}
+                disabled={savingDates}
+              >
+                {savingDates ? (
+                  <ActivityIndicator color="#FFF" size="small" />
+                ) : (
+                  <>
+                    <Feather name="check" size={18} color="#FFF" />
+                    <Text style={[styles.confirmButtonText, {marginLeft: 6}]}>Salvar</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </View>
   );
 }
@@ -413,4 +542,30 @@ const styles = StyleSheet.create({
   aiButton: { backgroundColor: '#805AD5', padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   aiButtonText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
   closeText: { color: '#007AFF', fontSize: 16 },
+
+  // Estilos do Modal de Configurações
+  settingsHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  dateSection: { marginBottom: 20 },
+  dateLabel: { fontSize: 14, fontWeight: '600', color: '#2D3748', marginBottom: 8 },
+  dateInput: { 
+    borderWidth: 1, 
+    borderColor: '#E2E8F0', 
+    borderRadius: 8, 
+    paddingHorizontal: 12, 
+    paddingVertical: 12, 
+    fontSize: 16, 
+    color: '#2D3748',
+    backgroundColor: '#F7FAFC',
+  },
+  dateHint: { fontSize: 12, color: '#718096', marginTop: 6, fontStyle: 'italic' },
+  infoBox: { 
+    flexDirection: 'row', 
+    alignItems: 'flex-start', 
+    backgroundColor: '#EBF8FF', 
+    padding: 12, 
+    borderRadius: 8, 
+    marginBottom: 20,
+    gap: 10,
+  },
+  infoText: { flex: 1, fontSize: 13, color: '#2C5282', lineHeight: 18 },
 });

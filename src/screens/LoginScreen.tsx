@@ -6,6 +6,7 @@ import {
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Feather } from '@expo/vector-icons';
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { 
   GoogleSignin, 
   statusCodes 
@@ -19,6 +20,7 @@ import t from "@/i18n/pt";
 GoogleSignin.configure({
   scopes: ['https://www.googleapis.com/auth/userinfo.email'],
   webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID, // DO WEB, NÃO DO ANDROID
+  iosClientId: '541381977382-fj4itntgeofla5l7h31saqb7bq4lsdru.apps.googleusercontent.com', // ID do iOS extraído do app.config.js
   offlineAccess: false,
 });
 
@@ -33,6 +35,7 @@ export default function LoginScreen({ navigation }: NativeStackScreenProps<RootS
     GoogleSignin.configure({
       scopes: ['https://www.googleapis.com/auth/userinfo.email'],
       webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+      iosClientId: '541381977382-fj4itntgeofla5l7h31saqb7bq4lsdru.apps.googleusercontent.com', // Garantia extra
       offlineAccess: false,
     });
   }, []);
@@ -41,12 +44,16 @@ export default function LoginScreen({ navigation }: NativeStackScreenProps<RootS
     setLoading(true);
     try {
       await GoogleSignin.hasPlayServices();
-      const userInfo = await GoogleSignin.signIn();
       
+      const userInfo = await GoogleSignin.signIn();
+      const tokens = await GoogleSignin.getTokens(); // Pega também o access token
+
       if (userInfo.data?.idToken) {
+        // Envia access_token para ajudar na validação quando o ID Token tem nonce (comum no iOS)
         const { error } = await supabase.auth.signInWithIdToken({
           provider: 'google',
           token: userInfo.data.idToken,
+          access_token: tokens.accessToken, 
         });
 
         if (error) throw error;

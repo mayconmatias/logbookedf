@@ -65,9 +65,9 @@ export const useLogWorkoutController = (params: { workoutId?: string; templateId
   const perfB = usePerformancePeek();
   const perfC = usePerformancePeek();
 
-  const timer = useTimer();
+  const { startTimer, stopTimer } = useTimer();
 
-  // Estados Locais
+  // Estados locais de UI/Edição
   const [saving, setSaving] = useState(false);
   const [prSetIds, setPrSetIds] = useState<Set<string>>(new Set());
   const [isAutocompleteFocused, setIsAutocompleteFocused] = useState(false);
@@ -272,6 +272,7 @@ export const useLogWorkoutController = (params: { workoutId?: string; templateId
   const handleFinish = useCallback(async () => {
     setSaving(true);
     try {
+      stopTimer(); // Para o timer ao finalizar a sessão
       await session.finishWorkout();
       await AsyncStorage.removeItem(DRAFT_KEY);
       navigation.dispatch(
@@ -436,6 +437,14 @@ export const useLogWorkoutController = (params: { workoutId?: string; templateId
         }
       }
 
+      // [LÓGICA UNILATERAL MANUAl]
+      // Se NÃO for treino programado (log livre), apenas inverte o lado se o usuário continuar no exercício
+      if (!session.isProgram && !isSuper && form.values.isUnilateral && form.values.activeSetType !== 'warmup') {
+        const nextSide = form.values.side === 'D' ? 'E' : 'D';
+        form.setters.setSide(nextSide);
+         // Mantem o peso e reps preenchidos para facilitar o log do outro lado
+      }
+
       // Pós-Save
       await refreshSessionData();
       await AsyncStorage.removeItem(DRAFT_KEY);
@@ -455,8 +464,24 @@ export const useLogWorkoutController = (params: { workoutId?: string; templateId
 
           if (nextEmptySet) {
             // Tem mais séries neste exercício -> Carrega
+            // [CHANGE] Passa o lado invertido como hint para o loadSetIntoForm ou define manualmente aqui se o exercício for unilateral
+             
+            // Se o exercício anterior era unilateral, vamos alternar o lado para a próxima série vazia
+            let nextSide = null;
+            if (form.values.isUnilateral) {
+                // Se acabou de fazer o direito (D), o próximo DEVE ser o esquerdo (E)
+                // Se acabou de fazer o esquerdo (E), o próximo DEVE ser o direito (D)
+                nextSide = form.values.side === 'D' ? 'E' : 'D';
+            }
+
             loadSetIntoForm(nextEmptySet, exerciseInData, { preserveWeight: weightToCarryOver });
-          } else {
+            
+            // Aplica a inversão de lado logo após carregar o form
+            if (nextSide && (nextSide === 'D' || nextSide === 'E')) {
+                form.setters.setSide(nextSide);
+            }
+
+          } else if (updatedWorkout[currentExIndex + 1]) {
             // Acabou este exercício -> Procura o próximo
             let nextExIndex = currentExIndex + 1;
             let nextExercise = updatedWorkout[nextExIndex];
@@ -736,7 +761,9 @@ export const useLogWorkoutController = (params: { workoutId?: string; templateId
 
   return {
     form, session, catalog, perfA, perfB, perfC, saving, prSetIds, isAutocompleteFocused, setIsAutocompleteFocused,
-    handleSaveSet, handleEditSet, handleDeleteSet, handleDeleteExercise, handleFinish, handleClearExerciseName, timer,
-    handleInitiateSubstitution, handleConfirmSubstitution
+    handleSaveSet, handleEditSet, handleDeleteSet, handleDeleteExercise, handleFinish, handleClearExerciseName,
+    handleInitiateSubstitution, handleConfirmSubstitution, 
+    // Expose timer methods if needed by UI
+    timer: { startTimer, stopTimer }
   };
 };

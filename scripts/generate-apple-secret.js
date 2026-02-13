@@ -4,7 +4,7 @@ const fs = require('fs');
 // --- PREENCHA SEUS DADOS AQUI ANTES DE RODAR ---
 const TEAM_ID = '3NLY5GWMHN'; // Ex: K342... (Do canto superior direito do Apple Developer)
 const KEY_ID = 'CL3SS5CS5Y';   // Ex: ABC1234... (Do portal onde você criou a Key)
-const CLIENT_ID = 'com.mayconmatias.logbookedf'; // Seu Bundle ID
+const CLIENT_ID = 'com.mayconmatias.logbookedf.web'; // Services ID para Web (diferente do Bundle ID do app)
 const KEY_FILE_PATH = './AuthKey_CL3SS5CS5Y.p8'; // Caminho para o arquivo .p8 que você baixou
 
 // ------------------------------------------------
